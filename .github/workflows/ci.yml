@@ -1,0 +1,335 @@
+name: oFono CI
+
+#
+# The basic flow of the CI is as follows:
+# Run the setup job
+# - Get all inputs, or default values, and set as 'setup' job output
+# - Checkout all dependent repositories
+# - Tar all local files. This is an unfortunate requirement since github jobs
+#   cannot share local files. Since there are multiple CI's acting on the same
+#   set of repositories it makes more sense to retain these and re-download
+#   them for each CI job.
+#
+# Build / cache the UML kernel
+#
+# Configure, build and test on multiple distros / compiler combinations
+
+on:
+  workflow_dispatch:
+  pull_request:
+env:
+  LINUX_URL: git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+  LINUX_BRANCH: linux-rolling-stable
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      repository: ${{ steps.inputs.outputs.repository }}
+      ref_branch: ${{ steps.inputs.outputs.ref_branch }}
+    steps:
+    - name: Setup Inputs
+      id: inputs
+      run: |
+        echo "repository=$GITHUB_REPOSITORY" >> $GITHUB_OUTPUT
+        echo "ref_branch=$GITHUB_REF" >> $GITHUB_OUTPUT
+
+    - name: Checkout oFono
+      uses: actions/checkout@v4
+      with:
+        path: ofono
+        repository: denkenz/ofonoCI
+        token: ${{ secrets.GITHUB_TOKEN }}
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: ${{ env.PR_FETCH_DEPTH }} + 1
+
+    - name: Checkout ELL
+      shell: bash
+      run: |
+        git clone git://git.kernel.org/pub/scm/libs/ell/ell.git
+
+    - name: Checkpatch
+      if: github.event_name == 'pull_request'
+      run: |
+          sudo apt-get install -y codespell
+          mkdir checkpatch
+          wget https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/scripts/checkpatch.pl
+          chmod u+x checkpatch.pl
+          pushd ofono
+          git format-patch --output-directory ../checkpatch -${{ github.event.pull_request.commits }}
+          popd
+          pushd checkpatch
+          if ../checkpatch.pl --ignore SPDX_LICENSE_TAG --ignore FILE_PATH_CHANGES --ignore PREFER_DEFINED_ATTRIBUTE_MACRO --ignore CONST_STRUCT --no-tree --no-signoff --summary --codespell --terse 0* > ../checkpatch-results.txt; then
+            echo "Checkpatch ran clean" > ../checkpatch-results.txt
+          fi
+          popd
+          echo "$(cat checkpatch-results.txt)" >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload Checkpatch Results
+      if: github.event_name == 'pull_request'
+      uses: actions/upload-artifact@v3
+      with:
+        name: checkpatch
+        path: checkpatch-results.txt
+
+    - name: Tar files
+      run: |
+        tar -cvf archive.tar ofono ell
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: artifacts
+        path: |
+          archive.tar
+
+  build-uml:
+    runs-on: ubuntu-latest
+    outputs:
+      LINUX_SHA: ${{ steps.last-commit.outputs.LINUX_SHA }}
+    steps:
+      - name: Determine last linux-stable commit
+        id: last-commit
+        shell: bash
+        run: |
+          LINUX_SHA=$(git ls-remote $LINUX_URL $LINUX_BRANCH | awk '{print $1}')
+          echo "LINUX_SHA=$LINUX_SHA" >> $GITHUB_OUTPUT
+
+      - name: Cache UML kernel
+        id: cache-linux
+        uses: actions/cache@v3
+        with:
+          path: linux
+          key: linux-${{ steps.last-commit.outputs.LINUX_SHA }}
+          restore-keys: linux-${{ steps.last-commit.outputs.LINUX_SHA }}
+
+      - name: Compile UML kernel
+        if: steps.cache-linux.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [ "$ARCH" = "i386" ]; then
+                  CROSS_COMPILE_OPT="CROSS_COMPILE=i686-linux-gnu-"
+          fi
+          mkdir linux-stable
+          pushd linux-stable
+          git init
+          git remote add origin $LINUX_URL
+          git pull --depth 1 origin ${{ steps.last-commit.outputs.LINUX_SHA }}
+          make ARCH=um defconfig
+          scripts/config --enable CONFIG_BINFMT_ELF
+          scripts/config --enable CONFIG_HOSTFS
+          scripts/config --enable CONFIG_UML_TIME_TRAVEL_SUPPORT
+          scripts/config --enable CONFIG_BINFMT_SCRIPT
+          make ARCH=um olddefconfig
+          make ARCH=um localyesconfig
+          make ARCH=um $CROSS_COMPILE_OPT -j$(nproc)
+          chmod +x linux
+          cp linux ..
+          popd
+
+  build-matrix:
+    needs: [setup, build-uml]
+    runs-on: ubuntu-latest
+    name: ${{matrix.container['name']}} ${{matrix.container['compiler']}} ${{matrix.configuration['name']}}
+    env:
+      RESULT_DIR: ${{ github.workspace }}/results
+
+    strategy:
+      fail-fast: false
+      matrix:
+        container:
+          - { image: "fedora:latest", name: "Fedora (glibc)", compiler: "clang", external-ell: false }
+          - { image: "alpine:latest", name: "Alpine (musl)", compiler: "gcc", external-ell: true }
+
+        configuration:
+          - { name: "debug", options: "--enable-debug --disable-optimization" }
+          - { name: "optimized", options: "--enable-optimization --disable-debug" }
+
+        include:
+          - container: { image: "fedora:latest", name: "Fedora (glibc)", compiler: "clang", external-ell: false }
+            configuration: { name: "debug+sanitizers", options: "--enable-debug --disable-optimization --enable-lsan --enable-ubsan --enable-asan" }
+            disable-uml: true # UML doesn't seem to work with ASAN
+
+    container:
+      image: ${{ matrix.container['image'] }}
+      env:
+        CC: ${{ matrix.container['compiler'] }}
+      options: --privileged -v /dev/shm:/dev/shm
+
+    steps:
+    - name: Show OS
+      run: |
+        cat /etc/os-release
+        echo "Compiler: $CC"
+        echo "$RESULT_DIR"
+        mkdir $RESULT_DIR
+        RESULT_FILE="$RESULT_DIR/name"
+        echo "${{matrix.container['name']}} ${{matrix.container['compiler']}} ${{matrix.configuration['name']}}" >> $RESULT_FILE
+
+    - name: Install additional packages
+      shell: sh
+      run: |
+        if [ "${{ matrix.container['image'] }}" == "fedora:latest" ]; then
+            echo "Setting up environment for Fedora"
+            yum -y install valgrind autoconf automake libtool make glib2-devel dbus-libs dbus-daemon dbus-devel libudev-devel zstd mobile-broadband-provider-info-devel openssl xz iproute
+            yum -y install ${{ matrix.container['compiler'] }}
+        elif [ "${{ matrix.container['image'] }}" == "alpine:latest" ]; then
+          echo "Setting up environment for Alpine"
+          apk add valgrind autoconf automake libtool musl-dev make pkgconfig glib-dev dbus-dev zstd eudev-dev mobile-broadband-provider-info openssl tar
+          apk add ${{ matrix.container['compiler'] }}
+        fi
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: artifacts
+
+    - name: Untar
+      run: tar -xf archive.tar
+
+    - name: Retrieve UML kernel
+      uses: actions/cache@v3
+      # MUSL seems to have a problem with UML
+      if: ${{ !matrix.disable-uml && matrix.container['image'] != 'alpine:latest' }}
+      with:
+        path: linux
+        key: linux-${{ needs.build-uml.outputs.LINUX_SHA }}
+        restore-keys: linux-${{ steps.last-commit.outputs.LINUX_SHA }}
+
+    - name: Build External ell
+      if: ${{ matrix.container.external-ell }}
+      working-directory: ell
+      run: |
+        ./bootstrap
+        ./configure ${{ matrix.configuration['options'] }} --prefix=/usr \
+                --sysconfdir=/etc \
+                --mandir=/usr/share/man \
+                --localstatedir=/var \
+                --enable-glib
+        make
+        make install
+
+    - name: Configure
+      id: configure
+      run: |
+        RESULT_FILE="$RESULT_DIR/configure"
+        OPTIONS="${{ matrix.configuration['options'] }}"
+        if ${{ matrix.container.external-ell }}; then
+          OPTIONS="$OPTIONS --enable-external-ell"
+        fi
+
+        if ./bootstrap-configure $OPTIONS 2> configure.log; then
+          echo "PASS" >> $RESULT_FILE
+          echo "Configure Successful" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "FAIL" >> $RESULT_FILE
+          echo "Configure Failed:" >> $GITHUB_STEP_SUMMARY
+          echo "$(cat configure.log)" | tee -a $GITHUB_STEP_SUMMARY >> $RESULT_FILE
+          exit 1
+        fi
+      working-directory: ofono
+
+    - name: Build
+      id: build
+      run: |
+        RESULT_FILE="$RESULT_DIR/build"
+        if make -j$(nproc) -k 2> make.log; then
+          echo "PASS" >> $RESULT_FILE
+          echo "Build Successful" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "FAIL" >> $RESULT_FILE
+          echo "Build Failed:" >> $GITHUB_STEP_SUMMARY
+          echo "$(cat make.log)" | tee -a $GITHUB_STEP_SUMMARY >> $RESULT_FILE
+          exit 1
+        fi
+      working-directory: ofono
+
+    - name: Unit tests
+      id: unit
+      run: |
+        RESULT_FILE="$RESULT_DIR/unit"
+        if make check > make-check.log; then
+          echo "PASS" >> $RESULT_FILE
+          echo "Unit tests passed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "FAIL" >> $RESULT_FILE
+          echo "Unit tests failed:" >> $GITHUB_STEP_SUMMARY
+          echo "$(cat make-check.log | grep ^FAIL)" | tee -a $GITHUB_STEP_SUMMARY>> $RESULT_FILE
+          exit 1
+        fi
+      working-directory: ofono
+
+    - name: stktest
+      id: stktest
+      if: ${{ !matrix.disable-uml && matrix.container['image'] != 'alpine:latest' }}
+      shell: sh {0}
+      run: |
+        RESULT_FILE="$RESULT_DIR/stktest"
+        timeout 120 tools/umlrunner run --debug --result stktest.result --log `pwd` ../linux .github/workflows/stktest.sh
+        if [ $? -eq 0 ]; then
+          echo "$(cat stktest.result)" >> $RESULT_FILE
+          echo "stktest: $(cat stktest.result)" >> $GITHUB_STEP_SUMMARY
+          echo "$(cat stktest.log | grep Failed)" | tee -a $GITHUB_STEP_SUMMARY >> $RESULT_FILE
+        else
+          echo "TIMEOUT" >> $RESULT_FILE
+          echo "stktest: Timed Out" >> $GITHUB_STEP_SUMMARY
+        fi
+      working-directory: ofono
+
+    # make distcheck currently fails for --enable-external-ell
+    - name: Distcheck
+      id: distcheck
+      if: ${{ !matrix.container.external-ell }}
+      run: |
+        RESULT_FILE="$RESULT_DIR/distcheck"
+        if make distcheck 2> make-distcheck.log; then
+          echo "PASS" >> $RESULT_FILE
+          echo "Distcheck Successful" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "FAIL" >> $RESULT_FILE
+          echo "Distcheck failed:" >> $GITHUB_STEP_SUMMARY
+          echo "$(cat make-distcheck.log)" | tee -a $GITHUB_STEP_SUMMARY >> $RESULT_FILE
+          exit 1
+        fi
+      working-directory: ofono
+
+    - name: Upload results
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4.0.0
+      with:
+        name: build-output-${{strategy.job-index}}
+        path: results/*
+        if-no-files-found: error
+        retention-days: 1
+
+  wrap-up:
+    needs: [build-matrix]
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Download results
+        uses: actions/download-artifact@v4.0.0
+        with:
+          path: results
+
+      - name: Download Checkpatch artifacts
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v3
+        with:
+          name: checkpatch
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: artifacts
+
+      - name: Untar
+        run: tar -xf archive.tar
+
+      - name: Collate Results
+        run: |
+          python ofono/.github/workflows/collate.py
+
+      - name: Report results
+        run: |
+          echo "$(cat email.txt)"
