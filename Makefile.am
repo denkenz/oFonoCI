@@ -653,26 +653,12 @@ builtin_sources += plugins/upower.c
 endif
 endif
 
-if PROVISION
-builtin_sources += plugins/mbpi.h plugins/mbpi.c
-
-builtin_modules += provision
-builtin_sources += plugins/provision.c
-
-builtin_modules += file_provision
-builtin_sources += plugins/file-provision.c
-
-endif
-
 if MAINTAINER_MODE
 builtin_modules += example_history
 builtin_sources += examples/history.c
 
 builtin_modules += example_nettime
 builtin_sources += examples/nettime.c
-
-builtin_modules += example_provision
-builtin_sources += examples/provision.c
 
 builtin_modules += example_emulator
 builtin_sources += examples/emulator.c
@@ -716,7 +702,7 @@ src_ofonod_SOURCES = $(builtin_sources) $(gatchat_sources) src/ofono.ver \
 			src/simfs.c src/simfs.h src/audio-settings.c \
 			src/smsagent.c src/smsagent.h src/ctm.c \
 			src/sim-auth.c \
-			src/message.h src/message.c src/gprs-provision.c \
+			src/message.h src/message.c \
 			src/emulator.c src/location-reporting.c \
 			src/gnss.c \
 			src/gnssagent.c src/gnssagent.h \
@@ -725,7 +711,10 @@ src_ofonod_SOURCES = $(builtin_sources) $(gatchat_sources) src/ofono.ver \
 			src/handsfree-audio.c src/bluetooth.h \
 			src/hfp.h src/siri.c \
 			src/netmon.c src/lte.c src/ims.c \
-			src/netmonagent.c src/netmonagent.h
+			src/netmonagent.c src/netmonagent.h \
+			src/module.c \
+			src/provisiondb.h src/provisiondb.c \
+			src/provision.c
 
 src_ofonod_LDADD = gdbus/libgdbus-internal.la $(builtin_libadd) $(ell_ldadd) \
 			@GLIB_LIBS@ @DBUS_LIBS@ -ldl
@@ -1008,8 +997,9 @@ tools_auto_enable_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ @DBUS_LIBS@
 tools_get_location_SOURCES = tools/get-location.c
 tools_get_location_LDADD = @GLIB_LIBS@ @DBUS_LIBS@
 
-tools_lookup_apn_SOURCES = plugins/mbpi.c plugins/mbpi.h tools/lookup-apn.c
-tools_lookup_apn_LDADD = @GLIB_LIBS@
+tools_lookup_apn_SOURCES = src/provisiondb.h src/provisiondb.c \
+				tools/lookup-apn.c
+tools_lookup_apn_LDADD = $(ell_ldadd)
 
 tools_tty_redirector_SOURCES = tools/tty-redirector.c
 tools_tty_redirector_LDADD = @GLIB_LIBS@
