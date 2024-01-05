@@ -40,12 +40,37 @@ jobs:
         path: ofono
         repository: denkenz/ofonoCI
         token: ${{ secrets.GITHUB_TOKEN }}
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: ${{ env.PR_FETCH_DEPTH }} + 1
 
     - name: Checkout ELL
       shell: bash
       run: |
         git clone git://git.kernel.org/pub/scm/libs/ell/ell.git
 
+    - name: Checkpatch
+      if: github.event_name == 'pull_request'
+      run: |
+          sudo apt-get install -y codespell
+          mkdir checkpatch
+          wget https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/scripts/checkpatch.pl
+          chmod u+x checkpatch.pl
+          pushd ofono
+          git format-patch --output-directory ../checkpatch -${{ github.event.pull_request.commits }}
+          popd
+          pushd checkpatch
+          if ../checkpatch.pl --ignore SPDX_LICENSE_TAG --ignore FILE_PATH_CHANGES --ignore PREFER_DEFINED_ATTRIBUTE_MACRO --ignore CONST_STRUCT --no-tree --no-signoff --summary --codespell --terse 0* > ../checkpatch-results.txt; then
+            echo "Checkpatch ran clean" > ../checkpatch-results.txt
+          fi
+          popd
+          echo "$(cat checkpatch-results.txt)" >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload Checkpatch Results
+      if: github.event_name == 'pull_request'
+      uses: actions/upload-artifact@v3
+      with:
+        name: checkpatch
+        path: checkpatch-results.txt
 
     - name: Tar files
       run: |
@@ -269,6 +294,17 @@ jobs:
         with:
           path: results
 
+      - name: Download artifacts
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v3
+        with:
+          name: checkpatch
+
       - name: Report results
         run: |
           grep . results/build-output-*/results_*.txt
+
+      - name: Report checkpatch results
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "$(cat checkpatch-results.txt)"
