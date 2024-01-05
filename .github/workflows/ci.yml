@@ -46,10 +46,23 @@ jobs:
       run: |
         git clone git://git.kernel.org/pub/scm/libs/ell/ell.git
 
+    - name: Checkpatch
+      if: github.event_name == 'pull_request'
+      run: |
+          mkdir checkpatch
+          wget https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/scripts/checkpatch.pl
+          chmod u+x checkpatch.pl
+          pushd ofono
+          git format-patch --output-directory ../checkpatch HEAD-{{ github.event.pull_request.commits }}
+          popd
+          pushd checkpatch
+          ../checkpatch.pl --ignore SPDX_LICENSE_TAG --ignore FILE_PATH_CHANGES --ignore PREFER_DEFINED_ATTRIBUTE_MACRO --no-signoff --summary --codespell --terse 0* >> ../checkpatch-results.txt
+          popd
+          echo "$(cat checkpatch-results.txt)" >> $GITHUB_STEP_SUMMARY
 
     - name: Tar files
       run: |
-        tar -cvf archive.tar ofono ell
+        tar -cvf archive.tar ofono ell checkpatch-results.txt
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v3
