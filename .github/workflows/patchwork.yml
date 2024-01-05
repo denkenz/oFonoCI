@@ -1,0 +1,142 @@
+name: Patchwork Workflow
+on:
+  workflow_dispatch:
+env:
+  PATCHWORK_URL: ${{ vars.PATCHWORK_URL }}
+  PATCHWORK_PROJECT: ${{ vars.PATCHWORK_PROJECT }}
+
+jobs:
+  obtain_series:
+    outputs:
+      matrix: ${{ steps.get_series.outputs.matrix }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+          sudo apt-get install -y libpython3-stdlib
+
+      - name: Obtain Patchwork Series
+        id: get_series
+        shell: python
+        run: |
+          import os
+          import requests
+          import json
+
+          def request(url):
+              resp = requests.get(url)
+              if resp.status_code != 200:
+                  raise requests.HTTPError("GET {}".format(resp.status_code))
+              return resp
+
+          def get_patches():
+              patches = []
+
+              url = '{}/patches/?project={}&archived=0&state=new'.format(os.environ['PATCHWORK_URL'], os.environ['PATCHWORK_PROJECT'])
+              while True:
+                  resp = request(url)
+                  patches = patches + resp.json()
+
+                  if "next" not in resp.links:
+                      break
+
+                  url = resp.links["next"]["url"]
+
+              return patches
+
+          def get_new_series():
+              series_dict = {}
+
+              patches = get_patches()
+              if len(patches) == 0:
+                  return series_dict
+
+              for patch in patches:
+                  if 'series' not in patch:
+                      continue
+
+                  for series in patch['series']:
+                      patch_ids = series_dict.get(series['id'], [])
+                      patch_ids.append(patch['id'])
+                      series_dict.update({series['id']: patch_ids})
+
+              return series_dict
+
+          def generate_matrix(series):
+              json_data = {
+                  "include": [
+                      {
+                          "series_id": series_id,
+                          "patch_ids": " ".join(map(str, patch_ids)),
+                      }
+                      for series_id, patch_ids in series.items()
+                  ]
+              }
+              return json_data
+
+          series = get_new_series()
+          matrix = generate_matrix(series)
+          print(series)
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              print('matrix={}'.format(json.dumps(matrix)), file=fh)
+
+  create_pr:
+    needs: obtain_series
+    runs-on: ubuntu-latest
+    name: Create PR for ${{ matrix.series_id }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PW_TOKEN: ${{ secrets.PATCHWORK_TOKEN }}
+      PW_SERVER: ${{ vars.PATCHWORK_URL }}
+      PW_PROJECT: ${{ vars.PATCHWORK_PROJECT }}
+
+    strategy:
+      matrix: ${{ fromJSON(needs.obtain_series.outputs.matrix)}}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pip install git-pw
+
+      - name: Setup git environment
+        run: |
+          git config --global user.name "$GITHUB_ACTOR"
+          git config --global user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Try apply series
+        id: apply_series
+        continue-on-error: true
+        run: |
+          git-pw series apply ${{ matrix.series_id }}
+
+      - name: Try apply individually
+        id: apply_manual
+        if: ${{ !cancelled() && steps.apply_series.outcome != 'success' }}
+        run: |
+          git am --abort
+          patch_id_list="${{ matrix.patch_ids }}"
+          for patch_id in $patch_id_list; do
+            git-pw patch apply --no-deps "$patch_id"
+          done
+
+      - name: Apply failed
+        if: ${{ failure() }}
+        run: |
+          echo "Patchwork series ${{ matrix.series_id }} could not be applied" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create PR
+        run: |
+          git checkout -b "patchwork/${{ matrix.series_id }}"
+          git push origin "patchwork/${{ matrix.series_id }}"
+          gh pr create --base workflow --head "patchwork/${{ matrix.series_id }}" --title "PW_SID:${{ matrix.series_id }}" --body "PR based on Patchwork series ${{matrix.series_id }}.  See https://patchwork.kernel.org/project/ofono/list/?series=${{ matrix.series_id }} for details"
+          git-pw patch update --state under-review ${{ matrix.patch_ids }}
