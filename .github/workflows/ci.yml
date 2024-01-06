@@ -312,15 +312,23 @@ jobs:
         with:
           path: results
 
-      - name: Download artifacts
+      - name: Download Checkpatch artifacts
         if: github.event_name == 'pull_request'
         uses: actions/download-artifact@v3
         with:
           name: checkpatch
 
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: artifacts
+
+      - name: Untar
+        run: tar -xf archive.tar
+
       - name: Collate Results
         run: |
-          python .github/workflow/collate.py
+          python ofono/.github/workflows/collate.py
 
       - name: Report results
         run: |
