@@ -1,6 +1,10 @@
 name: Patchwork Workflow
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [Sync Upstream]
+    types:
+      - completed
 env:
   PATCHWORK_URL: ${{ vars.PATCHWORK_URL }}
   PATCHWORK_PROJECT: ${{ vars.PATCHWORK_PROJECT }}
@@ -9,6 +13,7 @@ jobs:
   obtain_series:
     outputs:
       matrix: ${{ steps.get_series.outputs.matrix }}
+      num_prs: ${{ steps.get_series.outputs.num_prs }}
     runs-on: ubuntu-latest
     steps:
       - name: Set up Python
@@ -81,14 +86,16 @@ jobs:
               return json_data
 
           series = get_new_series()
-          matrix = generate_matrix(series)
           print(series)
+          matrix = generate_matrix(series)
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
               print('matrix={}'.format(json.dumps(matrix)), file=fh)
+              print('num_prs={}'.format(str(len(series))), file=fh)
 
   create_pr:
     needs: obtain_series
+    if: ${{ needs.obtain_series.outputs.num_prs != '0' }}
     runs-on: ubuntu-latest
     name: Create PR for ${{ matrix.series_id }}
     env:
