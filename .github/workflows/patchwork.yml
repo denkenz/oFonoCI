@@ -99,7 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Create PR for ${{ matrix.series_id }}
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.PR_TOKEN }}
       PW_TOKEN: ${{ secrets.PATCHWORK_TOKEN }}
       PW_SERVER: ${{ vars.PATCHWORK_URL }}
       PW_PROJECT: ${{ vars.PATCHWORK_PROJECT }}
