@@ -98,8 +98,6 @@ struct at_chat {
 	guint wakeup_timeout;			/* How long to wait for resp */
 	GTimer *wakeup_timer;			/* Keep track of elapsed time */
 	GAtSyntax *syntax;
-	gboolean destroyed;			/* Re-entrancy guard */
-	gboolean in_read_handler;		/* Re-entrancy guard */
 	gboolean in_notify;
 	GSList *terminator_list;		/* Non-standard terminator */
 	guint16 terminator_blacklist;		/* Blacklisted terinators */
@@ -727,16 +725,51 @@ static char *extract_line(struct at_chat *p, struct ring_buffer *rbuf)
 	return line;
 }
 
+static void at_chat_suspend(struct at_chat *chat)
+{
+	chat->suspended = TRUE;
+
+	g_at_io_set_write_handler(chat->io, NULL, NULL);
+	g_at_io_set_read_handler(chat->io, NULL, NULL);
+	g_at_io_set_debug(chat->io, NULL, NULL);
+}
+
+static struct at_chat *at_chat_ref(struct at_chat *chat)
+{
+	if (chat == NULL)
+		return NULL;
+
+	g_atomic_int_inc(&chat->ref_count);
+
+	return chat;
+}
+
+static void at_chat_unref(struct at_chat *chat)
+{
+	gboolean is_zero;
+
+	is_zero = g_atomic_int_dec_and_test(&chat->ref_count);
+
+	if (is_zero == FALSE)
+		return;
+
+	if (chat->io) {
+		at_chat_suspend(chat);
+		g_at_io_unref(chat->io);
+		chat->io = NULL;
+		chat_cleanup(chat);
+	}
+
+	g_free(chat);
+}
+
 static void new_bytes(struct ring_buffer *rbuf, gpointer user_data)
 {
-	struct at_chat *p = user_data;
+	struct at_chat *p = at_chat_ref(user_data);
 	unsigned int len = ring_buffer_len(rbuf);
 	unsigned int wrap = ring_buffer_len_no_wrap(rbuf);
 	unsigned char *buf = ring_buffer_read_ptr(rbuf, p->read_so_far);
-
 	GAtSyntaxResult result;
-
-	p->in_read_handler = TRUE;
 
 	while (p->suspended == FALSE && (p->read_so_far < len)) {
 		gsize rbytes = MIN(len - p->read_so_far, wrap - p->read_so_far);
@@ -778,10 +811,7 @@ static void new_bytes(struct ring_buffer *rbuf, gpointer user_data)
 		p->read_so_far = 0;
 	}
 
-	p->in_read_handler = FALSE;
-
-	if (p->destroyed)
-		g_free(p);
+	at_chat_unref(p);
 }
 
 static void wakeup_cb(gboolean ok, GAtResult *result, gpointer user_data)
@@ -931,15 +961,6 @@ static void chat_wakeup_writer(struct at_chat *chat)
 	g_at_io_set_write_handler(chat->io, can_write_data, chat);
 }
 
-static void at_chat_suspend(struct at_chat *chat)
-{
-	chat->suspended = TRUE;
-
-	g_at_io_set_write_handler(chat->io, NULL, NULL);
-	g_at_io_set_read_handler(chat->io, NULL, NULL);
-	g_at_io_set_debug(chat->io, NULL, NULL);
-}
-
 static void at_chat_resume(struct at_chat *chat)
 {
 	chat->suspended = FALSE;
@@ -956,28 +977,6 @@ static void at_chat_resume(struct at_chat *chat)
 
 	if (g_queue_get_length(chat->command_queue) > 0)
 		chat_wakeup_writer(chat);
-}
-
-static void at_chat_unref(struct at_chat *chat)
-{
-	gboolean is_zero;
-
-	is_zero = g_atomic_int_dec_and_test(&chat->ref_count);
-
-	if (is_zero == FALSE)
-		return;
-
-	if (chat->io) {
-		at_chat_suspend(chat);
-		g_at_io_unref(chat->io);
-		chat->io = NULL;
-		chat_cleanup(chat);
-	}
-
-	if (chat->in_read_handler)
-		chat->destroyed = TRUE;
-	else
-		g_free(chat);
 }
 
 static gboolean at_chat_set_disconnect_function(struct at_chat *chat,
@@ -1372,10 +1371,9 @@ GAtChat *g_at_chat_clone(GAtChat *clone)
 	if (chat == NULL)
 		return NULL;
 
-	chat->parent = clone->parent;
+	chat->parent = at_chat_ref(clone->parent);
 	chat->group = chat->parent->next_gid++;
 	chat->ref_count = 1;
-	g_atomic_int_inc(&chat->parent->ref_count);
 
 	if (clone->slave != NULL)
 		chat->slave = g_at_chat_clone(clone->slave);
