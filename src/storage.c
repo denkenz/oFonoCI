@@ -37,6 +37,8 @@
 
 #include "storage.h"
 
+#define STORAGE_DIR_MODE (S_IRUSR | S_IWUSR | S_IXUSR)
+
 const char *ofono_config_dir(void)
 {
 	return CONFIGDIR;
@@ -47,7 +49,7 @@ const char *ofono_storage_dir(void)
 	return STORAGEDIR;
 }
 
-int create_dirs(const char *filename, const mode_t mode)
+int create_dirs(const char *filename)
 {
 	struct stat st;
 	char *dir;
@@ -71,7 +73,7 @@ int create_dirs(const char *filename, const mode_t mode)
 
 		strncat(dir, prev + 1, next - prev);
 
-		if (mkdir(dir, mode) == -1 && errno != EEXIST) {
+		if (mkdir(dir, STORAGE_DIR_MODE) == -1 && errno != EEXIST) {
 			l_free(dir);
 			return -1;
 		}
@@ -133,7 +135,7 @@ ssize_t write_file(const unsigned char *buffer, size_t len,
 	tmp_path = l_strdup_printf("%s.XXXXXX.tmp", path);
 
 	r = -1;
-	if (create_dirs(path, mode | S_IXUSR) != 0)
+	if (create_dirs(path) != 0)
 		goto error_create_dirs;
 
 	fd = L_TFR(g_mkstemp_full(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, mode));
@@ -204,7 +206,7 @@ void storage_sync(const char *imsi, const char *store, GKeyFile *keyfile)
 	if (path == NULL)
 		return;
 
-	if (create_dirs(path, S_IRUSR | S_IWUSR | S_IXUSR) != 0) {
+	if (create_dirs(path) != 0) {
 		l_free(path);
 		return;
 	}
