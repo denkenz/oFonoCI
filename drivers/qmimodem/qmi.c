@@ -63,7 +63,6 @@ struct qmi_device {
 	int ref_count;
 	int fd;
 	GIOChannel *io;
-	bool close_on_unref;
 	guint read_watch;
 	guint write_watch;
 	GQueue *req_queue;
@@ -969,7 +968,6 @@ static int qmi_device_init(struct qmi_device *device, int fd,
 	device->ref_count = 1;
 
 	device->fd = fd;
-	device->close_on_unref = false;
 
 	flags = fcntl(device->fd, F_GETFL, NULL);
 	if (flags < 0)
@@ -1047,8 +1045,7 @@ void qmi_device_unref(struct qmi_device *device)
 	if (device->read_watch > 0)
 		g_source_remove(device->read_watch);
 
-	if (device->close_on_unref)
-		close(device->fd);
+	close(device->fd);
 
 	if (device->shutdown_source)
 		g_source_remove(device->shutdown_source);
@@ -1072,14 +1069,6 @@ void qmi_device_set_debug(struct qmi_device *device,
 
 	device->debug_func = func;
 	device->debug_data = user_data;
-}
-
-void qmi_device_set_close_on_unref(struct qmi_device *device, bool do_close)
-{
-	if (!device)
-		return;
-
-	device->close_on_unref = do_close;
 }
 
 void qmi_result_print_tlvs(struct qmi_result *result)
