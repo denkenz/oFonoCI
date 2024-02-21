@@ -1908,7 +1908,7 @@ struct service_create_data {
 	qmi_create_func_t func;
 	void *user_data;
 	qmi_destroy_func_t destroy;
-	guint timeout;
+	struct l_timeout *timeout;
 	uint16_t tid;
 };
 
@@ -1916,10 +1916,8 @@ static void service_create_data_free(gpointer user_data)
 {
 	struct service_create_data *data = user_data;
 
-	if (data->timeout) {
-		g_source_remove(data->timeout);
-		data->timeout = 0;
-	}
+	if (data->timeout)
+		l_timeout_remove(data->timeout);
 
 	if (data->destroy)
 		data->destroy(data->user_data);
@@ -1934,19 +1932,18 @@ struct service_create_shared_data {
 	qmi_create_func_t func;
 	void *user_data;
 	qmi_destroy_func_t destroy;
-	guint timeout;
+	struct l_idle *idle;
 };
 
-static gboolean service_create_shared_reply(gpointer user_data)
+static void service_create_shared_reply(struct l_idle *idle, void *user_data)
 {
 	struct service_create_shared_data *data = user_data;
 
-	data->timeout = 0;
+	l_idle_remove(data->idle);
+	data->idle = NULL;
 	data->func(data->service, data->user_data);
 
 	__qmi_device_discovery_complete(data->device, &data->super);
-
-	return FALSE;
 }
 
 static void service_create_shared_pending_reply(struct qmi_device *device,
@@ -1961,26 +1958,29 @@ static void service_create_shared_pending_reply(struct qmi_device *device,
 		struct service_create_shared_data *shared_data = l->data;
 
 		shared_data->service = qmi_service_ref(service);
-		shared_data->timeout = g_timeout_add(
-				0, service_create_shared_reply, shared_data);
+		shared_data->idle = l_idle_create(service_create_shared_reply,
+							shared_data, NULL);
 	}
 
 	g_list_free(*shared);
 	l_free(shared);
 }
 
-static gboolean service_create_reply(gpointer user_data)
+static void service_create_reply(struct l_timeout *timeout, void *user_data)
 {
 	struct service_create_data *data = user_data;
 	struct qmi_device *device = data->device;
 	struct qmi_request *req;
+
+	DBG("");
 
 	service_create_shared_pending_reply(device, data->type, NULL);
 
 	/* remove request from queues */
 	req = find_control_request(device, data->tid);
 
-	data->timeout = 0;
+	l_timeout_remove(data->timeout);
+	data->timeout = NULL;
 
 	if (data->func)
 		data->func(NULL, data->user_data);
@@ -1989,8 +1989,6 @@ static gboolean service_create_reply(gpointer user_data)
 
 	if (req)
 		__request_free(req);
-
-	return FALSE;
 }
 
 static void service_create_callback(uint16_t message, uint16_t length,
@@ -2093,7 +2091,7 @@ static bool service_create(struct qmi_device *device,
 			service_create_callback, data);
 
 	data->tid = __request_submit(device, req);
-	data->timeout = g_timeout_add_seconds(8, service_create_reply, data);
+	data->timeout = l_timeout_create(8, service_create_reply, data, NULL);
 
 	__qmi_device_discovery_started(device, &data->super);
 
@@ -2108,10 +2106,8 @@ static void service_create_shared_data_free(gpointer user_data)
 {
 	struct service_create_shared_data *data = user_data;
 
-	if (data->timeout) {
-		g_source_remove(data->timeout);
-		data->timeout = 0;
-	}
+	if (data->idle)
+		l_idle_remove(data->idle);
 
 	qmi_service_unref(data->service);
 
@@ -2168,8 +2164,8 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 
 		if (!(type_val & 0x80000000)) {
 			data->service = qmi_service_ref(service);
-			data->timeout = g_timeout_add(
-					0, service_create_shared_reply, data);
+			data->idle = l_idle_create(service_create_shared_reply,
+							data, NULL);
 		} else
 			*l = g_list_prepend(*l, data);
 
