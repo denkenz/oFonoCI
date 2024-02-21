@@ -1102,6 +1102,7 @@ struct discover_data {
 	qmi_destroy_func_t destroy;
 	uint16_t tid;
 	struct l_timeout *timeout;
+	struct l_idle *idle;
 };
 
 static void discover_data_free(void *user_data)
@@ -1110,6 +1111,9 @@ static void discover_data_free(void *user_data)
 
 	if (data->timeout)
 		l_timeout_remove(data->timeout);
+
+	if (data->idle)
+		l_idle_remove(data->idle);
 
 	if (data->destroy)
 		data->destroy(data->user_data);
@@ -1251,11 +1255,29 @@ static struct qmi_request *find_control_request(struct qmi_device *device,
 	return req;
 }
 
-static void discover_reply(struct l_timeout *timeout, void *user_data)
+
+static void discover_reply_idle(struct l_idle *idle, void *user_data)
+{
+	struct discover_data *data = user_data;
+	struct qmi_device *device = data->device;
+
+	l_idle_remove(data->idle);
+	data->idle = NULL;
+
+	if (data->func)
+		data->func(data->user_data);
+
+	__qmi_device_discovery_complete(device, &data->super);
+}
+
+static void discover_reply_timeout(struct l_timeout *timeout, void *user_data)
 {
 	struct discover_data *data = user_data;
 	struct qmi_device *device = data->device;
 	struct qmi_request *req;
+
+	l_timeout_remove(data->timeout);
+	data->timeout = NULL;
 
 	/* remove request from queues */
 	req = find_control_request(device, data->tid);
@@ -1289,7 +1311,7 @@ bool qmi_device_discover(struct qmi_device *device, qmi_discover_func_t func,
 	data->destroy = destroy;
 
 	if (device->version_list) {
-		data->timeout = l_timeout_create(0, discover_reply, data, NULL);
+		data->idle = l_idle_create(discover_reply_idle, data, NULL);
 		__qmi_device_discovery_started(device, &data->super);
 		return true;
 	}
@@ -1299,7 +1321,7 @@ bool qmi_device_discover(struct qmi_device *device, qmi_discover_func_t func,
 			NULL, 0, discover_callback, data);
 
 	data->tid = __request_submit(device, req);
-	data->timeout = l_timeout_create(5, discover_reply, data, NULL);
+	data->timeout = l_timeout_create(5, discover_reply_timeout, data, NULL);
 
 	__qmi_device_discovery_started(device, &data->super);
 
