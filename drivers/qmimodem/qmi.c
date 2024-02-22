@@ -1382,24 +1382,27 @@ static void service_create_shared_reply(struct l_idle *idle, void *user_data)
 	__qmi_device_discovery_complete(data->device, &data->super);
 }
 
+static void service_create_shared_schedule_callback(void *data, void *user_data)
+{
+	struct service_create_shared_data *shared_data = data;
+	struct qmi_service *service = user_data;
+
+	shared_data->service = qmi_service_ref(service);
+	shared_data->idle = l_idle_create(service_create_shared_reply,
+						shared_data, NULL);
+
+}
+
 static void service_create_shared_pending_reply(struct qmi_device *device,
 						unsigned int type,
 						struct qmi_service *service)
 {
-	gpointer key = L_UINT_TO_PTR(type | 0x80000000);
-	GList **shared = l_hashmap_remove(device->service_list, key);
-	GList *l;
+	void *key = L_UINT_TO_PTR(type | 0x80000000);
+	struct l_queue *shared = l_hashmap_remove(device->service_list, key);
 
-	for (l = *shared; l; l = l->next) {
-		struct service_create_shared_data *shared_data = l->data;
-
-		shared_data->service = qmi_service_ref(service);
-		shared_data->idle = l_idle_create(service_create_shared_reply,
-							shared_data, NULL);
-	}
-
-	g_list_free(*shared);
-	l_free(shared);
+	l_queue_foreach(shared, service_create_shared_schedule_callback,
+						service);
+	l_queue_destroy(shared, NULL);
 }
 
 static void service_create_shared_data_free(gpointer user_data)
@@ -1699,14 +1702,14 @@ static int qmi_device_qmux_client_create(struct qmi_device *device,
 	unsigned char client_req[] = { 0x01, 0x01, 0x00, service_type };
 	struct qmi_request *req;
 	struct qmux_client_create_data *data;
-	GList **shared;
+	struct l_queue *shared;
 	unsigned int type_val = service_type;
 	int i;
 
 	if (!device->version_list)
 		return -ENOENT;
 
-	shared = l_new(GList *, 1);
+	shared = l_queue_new();
 	data = l_new(struct qmux_client_create_data, 1);
 
 	data->super.destroy = qmux_client_create_data_free;
@@ -2148,7 +2151,7 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 			qmi_create_func_t func, void *user_data,
 			qmi_destroy_func_t destroy)
 {
-	GList **l = NULL;
+	struct l_queue *shared = NULL;
 	struct qmi_service *service = NULL;
 	unsigned int type_val = type;
 	int r;
@@ -2159,10 +2162,10 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 	if (type == QMI_SERVICE_CONTROL)
 		return false;
 
-	l = l_hashmap_lookup(device->service_list,
+	shared = l_hashmap_lookup(device->service_list,
 				L_UINT_TO_PTR(type_val | 0x80000000));
 
-	if (!l) {
+	if (!shared) {
 		/*
 		 * There is no way to find in an l_hashmap using a custom
 		 * function. Instead we use a temporary struct to store the
@@ -2179,7 +2182,7 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 	} else
 		type_val |= 0x80000000;
 
-	if (l || service) {
+	if (shared || service) {
 		struct service_create_shared_data *data;
 
 		data = l_new(struct service_create_shared_data, 1);
@@ -2195,7 +2198,7 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 			data->idle = l_idle_create(service_create_shared_reply,
 							data, NULL);
 		} else
-			*l = g_list_prepend(*l, data);
+			l_queue_push_head(shared, data);
 
 		__qmi_device_discovery_started(device, &data->super);
 
