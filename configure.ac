@@ -227,6 +227,15 @@ AC_ARG_ENABLE(qmimodem, AS_HELP_STRING([--disable-qmimodem],
 					[enable_qmimodem=${enableval}])
 AM_CONDITIONAL(QMIMODEM, test "${enable_qmimodem}" != "no")
 
+AC_ARG_ENABLE(qrtr, AS_HELP_STRING([--enable_qrtr],
+				[enable Qualcomm QRTR modem support (WIP)]),
+					[enable_qrtr=${enableval}],
+					[enable_qrtr=no])
+AM_CONDITIONAL(QMIMODEM_QRTR, test "${enable_qrtr}" != "no")
+if (test "${enable_qrtr}" == "yes"); then
+	AC_DEFINE(QMIMODEM_QRTR, [], [forces Qualcomm QRTR instead of QMUX])
+fi
+
 AC_ARG_ENABLE(mbimmodem, AS_HELP_STRING([--disable-mbimmodem],
 				[disable MBIM modem support]),
 					[enable_mbimmodem=${enableval}])

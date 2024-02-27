@@ -386,6 +386,11 @@ builtin_sources += $(qmi_sources) \
 			drivers/qmimodem/call-forwarding.c
 
 builtin_sources += plugins/gobi.c
+
+if QMIMODEM_QRTR
+builtin_modules += gobi
+endif
+
 endif
 
 if MBIMMODEM

@@ -105,6 +105,7 @@ static int gobi_probe(struct ofono_modem *modem)
 	if (!data)
 		return -ENOMEM;
 
+#ifndef QMIMODEM_QRTR
 	kernel_driver = ofono_modem_get_string(modem, "KernelDriver");
 	DBG("kernel_driver: %s", kernel_driver);
 
@@ -117,6 +118,9 @@ static int gobi_probe(struct ofono_modem *modem)
 			ofono_modem_get_string(modem, "NetworkInterface"),
 			sizeof(data->main_net_name));
 	DBG("net: %s (%d)", data->main_net_name, data->main_net_ifindex);
+#else
+	(void) kernel_driver;
+#endif
 
 	ofono_modem_set_data(modem, data);
 
@@ -175,7 +179,10 @@ static void shutdown_device(struct ofono_modem *modem)
 
 	cleanup_services(data);
 
-	qmi_device_shutdown(data->device, shutdown_cb, modem, NULL);
+	if (qmi_device_shutdown(data->device, shutdown_cb, modem, NULL)) {
+		DBG("qmi_device_shutdown failed, calling shutdown_cb directly");
+		shutdown_cb(modem);
+	}
 }
 
 static void power_reset_cb(struct qmi_result *result, void *user_data)
@@ -426,11 +433,17 @@ static int gobi_enable(struct ofono_modem *modem)
 
 	DBG("%p", modem);
 
+#ifdef QMIMODEM_QRTR
+	(void) device;
+	data->device = qmi_device_new_qrtr();
+#else
 	device = ofono_modem_get_string(modem, "Device");
 	if (!device)
 		return -EINVAL;
 
 	data->device = qmi_device_new_qmux(device);
+#endif
+
 	if (!data->device)
 		return -EIO;
 
@@ -766,3 +779,28 @@ static struct ofono_modem_driver gobi_driver = {
 };
 
 OFONO_MODEM_DRIVER_BUILTIN(gobi, &gobi_driver)
+
+#ifdef QMIMODEM_QRTR
+static struct ofono_modem *qrtr_modem;
+
+static int gobi_init(void)
+{
+	DBG("");
+
+	qrtr_modem = ofono_modem_create(NULL, "gobi");
+	ofono_modem_register(qrtr_modem);
+
+	return 0;
+}
+
+static void gobi_exit(void)
+{
+	DBG("");
+
+	ofono_modem_remove(qrtr_modem);
+	qrtr_modem = NULL;
+}
+
+OFONO_PLUGIN_DEFINE(gobi, "Qualcomm Gobi modem driver", VERSION,
+			OFONO_PLUGIN_PRIORITY_DEFAULT, gobi_init, gobi_exit)
+#endif

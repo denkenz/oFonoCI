@@ -33,6 +33,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <linux/limits.h>
+#include <linux/qrtr.h>
+#include <sys/socket.h>
 
 #include <ell/ell.h>
 
@@ -1872,6 +1874,235 @@ struct qmi_device *qmi_device_new_qmux(const char *device)
 	l_io_set_read_handler(qmux->super.io, received_qmux_data, qmux, NULL);
 
 	return &qmux->super;
+}
+
+struct qmi_device_qrtr {
+	struct qmi_device super;
+	struct discover_data *discover_data;
+};
+
+static void __debug_ctrl_request(const struct qrtr_ctrl_pkt *packet,
+					qmi_debug_func_t function,
+					void *user_data)
+{
+	char strbuf[72 + 16], *str;
+	const char *type;
+
+	if (!function)
+		return;
+
+	str = strbuf;
+	str += sprintf(str, "    %s",
+			__service_type_to_string(QMI_SERVICE_CONTROL));
+
+	type = "_pkt";
+
+	str += sprintf(str, "%s cmd=%d", type,
+				L_LE32_TO_CPU(packet->cmd));
+
+	function(strbuf, user_data);
+}
+
+static void handle_control_packet(struct qmi_device_qrtr *qrtr,
+					const struct qrtr_ctrl_pkt *packet)
+{
+	struct qmi_device *device = &qrtr->super;
+	uint32_t cmd;
+	uint32_t type;
+	uint32_t instance;
+	uint32_t version;
+	uint32_t node;
+	uint32_t port;
+
+	__debug_ctrl_request(packet, device->debug_func,
+				device->debug_data);
+
+	cmd = L_LE32_TO_CPU(packet->cmd);
+	if (cmd != QRTR_TYPE_NEW_SERVER) {
+		DBG("Unknown command: %d", cmd);
+		return;
+	}
+
+	if (!packet->server.service && !packet->server.instance &&
+		!packet->server.node && !packet->server.port) {
+		DBG("Initial service discovery has completed");
+
+		if (qrtr->discover_data->func)
+			qrtr->discover_data->func(qrtr->discover_data->user_data);
+
+		discover_data_free(qrtr->discover_data);
+		qrtr->discover_data = NULL;
+
+		return;
+	}
+
+	type = L_LE32_TO_CPU(packet->server.service);
+	version = L_LE32_TO_CPU(packet->server.instance) & 0xff;
+	instance = L_LE32_TO_CPU(packet->server.instance) >> 8;
+
+	node = L_LE32_TO_CPU(packet->server.node);
+	port = L_LE32_TO_CPU(packet->server.port);
+
+	if (cmd == QRTR_TYPE_NEW_SERVER) {
+		DBG("New server: Type: %d Version: %d Instance: %d Node: %d Port: %d",
+			type, version, instance, node, port);
+	}
+}
+
+static void handle_packet(struct qmi_device_qrtr *qrtr, uint32_t sending_port,
+				const void *buf, ssize_t len)
+{
+	const struct qrtr_ctrl_pkt *packet = buf;
+
+	if (sending_port != QRTR_PORT_CTRL) {
+		DBG("Receive of service data is not implemented");
+		return;
+	}
+
+	if ((unsigned long) len < sizeof(*packet)) {
+		DBG("qrtr control packet is too small");
+		return;
+	}
+
+	handle_control_packet(qrtr, packet);
+}
+
+static bool received_qrtr_data(struct l_io *io, void *user_data)
+{
+	struct qmi_device_qrtr *qrtr = user_data;
+	struct sockaddr_qrtr addr;
+	unsigned char buf[2048];
+	ssize_t bytes_read;
+	socklen_t addr_size;
+
+	addr_size = sizeof(addr);
+	bytes_read = recvfrom(l_io_get_fd(qrtr->super.io), buf, sizeof(buf), 0,
+				(struct sockaddr *) &addr, &addr_size);
+	DBG("Received %ld bytes from Node: %d Port: 0x%x", bytes_read,
+		addr.sq_node, addr.sq_port);
+
+	if (bytes_read < 0)
+		return true;
+
+	l_util_hexdump(true, buf, bytes_read, qrtr->super.debug_func,
+			qrtr->super.debug_data);
+
+	handle_packet(qrtr, addr.sq_port, buf, bytes_read);
+
+	return true;
+}
+
+static int qmi_device_qrtr_discover(struct qmi_device *device,
+					qmi_discover_func_t func,
+					void *user_data,
+					qmi_destroy_func_t destroy)
+{
+	struct qmi_device_qrtr *qrtr =
+		l_container_of(device, struct qmi_device_qrtr, super);
+	struct discover_data *data;
+	struct qrtr_ctrl_pkt packet;
+	struct sockaddr_qrtr addr;
+	socklen_t addr_len;
+	int rc;
+	ssize_t bytes_written;
+	int fd;
+
+	__debug_device(device, "device %p discover", device);
+
+	if (qrtr->discover_data)
+		return -EINPROGRESS;
+
+	data = l_new(struct discover_data, 1);
+
+	data->super.destroy = discover_data_free;
+	data->device = device;
+	data->func = func;
+	data->user_data = user_data;
+	data->destroy = destroy;
+
+	fd = l_io_get_fd(device->io);
+
+	/*
+	 * The control node is configured by the system. Use getsockname to
+	 * get its value.
+	 */
+	addr_len = sizeof(addr);
+	rc = getsockname(fd, (struct sockaddr *) &addr, &addr_len);
+	if (rc) {
+		DBG("getsockname failed: %s", strerror(errno));
+		goto error;
+	}
+
+	if (addr.sq_family != AF_QIPCRTR || addr_len != sizeof(addr)) {
+		DBG("Unexpected sockaddr from getsockname. family: %d size: %d",
+			addr.sq_family, addr_len);
+		rc = -EIO;
+		goto error;
+	}
+
+	addr.sq_port = QRTR_PORT_CTRL;
+	memset(&packet, 0, sizeof(packet));
+	packet.cmd = L_CPU_TO_LE32(QRTR_TYPE_NEW_LOOKUP);
+
+	bytes_written = sendto(fd, &packet,
+				sizeof(packet), 0,
+				(struct sockaddr *) &addr, addr_len);
+	if (bytes_written < 0) {
+		DBG("Failure sending data: %s", strerror(errno));
+		rc = -errno;
+		goto error;
+	}
+
+	l_util_hexdump(false, &packet, bytes_written,
+			device->debug_func, device->debug_data);
+
+	qrtr->discover_data = data;
+
+	return 0;
+
+error:
+	l_free(data);
+
+	return rc;
+}
+
+static void qmi_device_qrtr_destroy(struct qmi_device *device)
+{
+	struct qmi_device_qrtr *qrtr =
+		l_container_of(device, struct qmi_device_qrtr, super);
+
+	l_free(qrtr);
+}
+
+static const struct qmi_device_ops qrtr_ops = {
+	.write = NULL,
+	.discover = qmi_device_qrtr_discover,
+	.client_create = NULL,
+	.client_release = NULL,
+	.shutdown = NULL,
+	.destroy = qmi_device_qrtr_destroy,
+};
+
+struct qmi_device *qmi_device_new_qrtr(void)
+{
+	struct qmi_device_qrtr *qrtr;
+	int fd;
+
+	fd = socket(AF_QIPCRTR, SOCK_DGRAM, 0);
+	if (fd < 0)
+		return NULL;
+
+	qrtr = l_new(struct qmi_device_qrtr, 1);
+
+	if (qmi_device_init(&qrtr->super, fd, &qrtr_ops) < 0) {
+		close(fd);
+		l_free(qrtr);
+		return NULL;
+	}
+
+	l_io_set_read_handler(qrtr->super.io, received_qrtr_data, qrtr, NULL);
+
+	return &qrtr->super;
 }
 
 struct qmi_param *qmi_param_new(void)
