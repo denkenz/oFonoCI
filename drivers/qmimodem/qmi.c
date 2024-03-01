@@ -61,6 +61,7 @@ struct qmi_service_info {
 
 struct qmi_request {
 	uint16_t tid;
+	unsigned int group_id;		/* Always 0 for control */
 	uint8_t client;
 	qmi_message_func_t callback;
 	void *user_data;
@@ -90,6 +91,7 @@ struct qmi_device {
 	struct l_queue *req_queue;
 	struct l_queue *service_queue;
 	struct l_queue *discovery_queue;
+	unsigned int next_group_id;	/* Matches requests with services */
 	uint16_t next_service_tid;
 	qmi_debug_func_t debug_func;
 	void *debug_data;
@@ -119,6 +121,7 @@ struct qmi_service {
 	int ref_count;
 	struct qmi_device *device;
 	struct qmi_service_info info;
+	unsigned int group_id;
 	uint8_t client_id;
 	uint16_t next_notify_id;
 	struct l_queue *notify_list;
@@ -213,6 +216,7 @@ static void __qmi_service_appeared(struct qmi_device *device,
 }
 
 static struct qmi_request *__request_alloc(uint8_t service,
+				unsigned int group_id,
 				uint8_t client, uint16_t message,
 				const void *data,
 				uint16_t length, qmi_message_func_t func,
@@ -232,6 +236,7 @@ static struct qmi_request *__request_alloc(uint8_t service,
 	msglen = hdrlen + QMI_MESSAGE_HDR_SIZE + length;
 	req = l_malloc(sizeof(struct qmi_request) + msglen);
 	req->tid = 0;
+	req->group_id = group_id;
 	req->len = msglen;
 	req->client = client;
 
@@ -1397,6 +1402,11 @@ static struct qmi_service *service_create(struct qmi_device *device,
 	service->client_id = client_id;
 	service->notify_list = l_queue_new();
 
+	if (device->next_group_id == 0) /* 0 is reserved for control */
+		device->next_group_id = 1;
+
+	service->group_id = device->next_group_id++;
+
 	memcpy(&service->info, info, sizeof(service->info));
 
 	__debug_device(device, "service created [client=%d,type=%d]",
@@ -1484,7 +1494,7 @@ static bool qmi_device_qmux_sync(struct qmi_device_qmux *qmux,
 
 	__debug_device(&qmux->super, "Sending sync to reset QMI");
 
-	req = __request_alloc(QMI_SERVICE_CONTROL, 0x00,
+	req = __request_alloc(QMI_SERVICE_CONTROL, 0, 0x00,
 				QMI_CTL_SYNC, NULL, 0,
 				qmux_sync_callback, data);
 
@@ -1612,7 +1622,7 @@ static int qmi_device_qmux_discover(struct qmi_device *device,
 	data->user_data = user_data;
 	data->destroy = destroy;
 
-	req = __request_alloc(QMI_SERVICE_CONTROL, 0x00,
+	req = __request_alloc(QMI_SERVICE_CONTROL, 0, 0x00,
 			QMI_CTL_GET_VERSION_INFO,
 			NULL, 0, qmux_discover_callback, data);
 
@@ -1758,7 +1768,7 @@ static int qmi_device_qmux_client_create(struct qmi_device *device,
 	qmi_device_get_service_version(device, data->type,
 						&data->major, &data->minor);
 
-	req = __request_alloc(QMI_SERVICE_CONTROL, 0x00,
+	req = __request_alloc(QMI_SERVICE_CONTROL, 0, 0x00,
 			QMI_CTL_GET_CLIENT_ID,
 			client_req, sizeof(client_req),
 			qmux_client_create_callback, data);
@@ -1795,7 +1805,7 @@ static void qmi_device_qmux_client_release(struct qmi_device *device,
 
 	qmux->release_users++;
 
-	req = __request_alloc(QMI_SERVICE_CONTROL, 0x00,
+	req = __request_alloc(QMI_SERVICE_CONTROL, 0, 0x00,
 			QMI_CTL_RELEASE_CLIENT_ID,
 			release_req, sizeof(release_req),
 			qmux_client_release_callback, qmux);
@@ -2667,7 +2677,7 @@ uint16_t qmi_service_send(struct qmi_service *service,
 	if (!service)
 		return 0;
 
-	if (!service->client_id)
+	if (!service->group_id)
 		return 0;
 
 	device = service->device;
@@ -2680,8 +2690,8 @@ uint16_t qmi_service_send(struct qmi_service *service,
 	data->user_data = user_data;
 	data->destroy = destroy;
 
-	req = __request_alloc(service->info.service_type, service->client_id,
-				message,
+	req = __request_alloc(service->info.service_type, service->group_id,
+				service->client_id, message,
 				param ? param->data : NULL,
 				param ? param->length : 0,
 				service_send_callback, data);
@@ -2729,9 +2739,9 @@ bool qmi_service_cancel(struct qmi_service *service, uint16_t id)
 static bool remove_req_if_match(void *data, void *user_data)
 {
 	struct qmi_request *req = data;
-	uint8_t client = L_PTR_TO_UINT(user_data);
+	unsigned int group_id = L_PTR_TO_UINT(user_data);
 
-	if (!req->client || req->client != client)
+	if (req->group_id != group_id)
 		return false;
 
 	service_send_free(req->user_data);
@@ -2740,10 +2750,10 @@ static bool remove_req_if_match(void *data, void *user_data)
 	return true;
 }
 
-static void remove_client(struct l_queue *queue, uint8_t client)
+static void remove_client(struct l_queue *queue, unsigned int group_id)
 {
 	l_queue_foreach_remove(queue, remove_req_if_match,
-				L_UINT_TO_PTR(client));
+				L_UINT_TO_PTR(group_id));
 }
 
 bool qmi_service_cancel_all(struct qmi_service *service)
@@ -2753,15 +2763,15 @@ bool qmi_service_cancel_all(struct qmi_service *service)
 	if (!service)
 		return false;
 
-	if (!service->client_id)
+	if (!service->group_id)
 		return false;
 
 	device = service->device;
 	if (!device)
 		return false;
 
-	remove_client(device->req_queue, service->client_id);
-	remove_client(device->service_queue, service->client_id);
+	remove_client(device->req_queue, service->group_id);
+	remove_client(device->service_queue, service->group_id);
 
 	return true;
 }
