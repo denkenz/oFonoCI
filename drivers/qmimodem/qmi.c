@@ -62,7 +62,7 @@ struct qmi_service_info {
 struct qmi_request {
 	uint16_t tid;
 	unsigned int group_id;		/* Always 0 for control */
-	uint8_t client;
+	uint8_t client;			/* Always 0 for control and qrtr */
 	struct qmi_service_info info;	/* Not used for control requests */
 	qmi_message_func_t callback;
 	void *user_data;
@@ -216,8 +216,7 @@ static void __qmi_service_appeared(struct qmi_device *device,
 				l_memdup(info, sizeof(struct qmi_service_info)));
 }
 
-static struct qmi_request *__request_alloc(uint8_t service,
-				unsigned int group_id,
+static struct qmi_request *__request_alloc(uint32_t service_type,
 				uint8_t client, uint16_t message,
 				const void *data,
 				uint16_t length, qmi_message_func_t func,
@@ -229,7 +228,7 @@ static struct qmi_request *__request_alloc(uint8_t service,
 	uint16_t hdrlen = QMI_MUX_HDR_SIZE;
 	uint16_t msglen;
 
-	if (service == QMI_SERVICE_CONTROL)
+	if (service_type == QMI_SERVICE_CONTROL)
 		hdrlen += QMI_CONTROL_HDR_SIZE;
 	else
 		hdrlen += QMI_SERVICE_HDR_SIZE;
@@ -237,7 +236,6 @@ static struct qmi_request *__request_alloc(uint8_t service,
 	msglen = hdrlen + QMI_MESSAGE_HDR_SIZE + length;
 	req = l_malloc(sizeof(struct qmi_request) + msglen);
 	req->tid = 0;
-	req->group_id = group_id;
 	req->len = msglen;
 	req->client = client;
 
@@ -246,7 +244,7 @@ static struct qmi_request *__request_alloc(uint8_t service,
 	hdr->frame = 0x01;
 	hdr->length = L_CPU_TO_LE16(req->len - 1);
 	hdr->flags = 0x00;
-	hdr->service = service;
+	hdr->service = service_type; /* qmux service types are 8 bits */
 	hdr->client = client;
 
 	msg = (struct qmi_message_hdr *) &req->data[hdrlen];
@@ -267,21 +265,20 @@ static struct qmi_request *__control_request_alloc(uint16_t message,
 				const void *data, uint16_t length,
 				qmi_message_func_t func, void *user_data)
 {
-	return __request_alloc(QMI_SERVICE_CONTROL, 0, 0x00, message,
+	return __request_alloc(QMI_SERVICE_CONTROL, 0x00, message,
 					data, length, func, user_data);
 
 }
 
 static struct qmi_request *__service_request_alloc(
 				struct qmi_service_info *info,
-				unsigned int service_id, uint8_t client,
-				uint16_t message,
+				uint8_t client, uint16_t message,
 				const void *data, uint16_t length,
 				qmi_message_func_t func, void *user_data)
 {
 	struct qmi_request *req;
 
-	req = __request_alloc(info->service_type, service_id, client, message,
+	req = __request_alloc(info->service_type, client, message,
 						data, length, func, user_data);
 	memcpy(&req->info, info, sizeof(req->info));
 
@@ -530,94 +527,49 @@ int qmi_error_to_ofono_cme(int qmi_error)
 	}
 }
 
-static void __debug_msg(const char dir, const void *buf, size_t len,
-				qmi_debug_func_t function, void *user_data)
+static void __debug_msg(char dir, const struct qmi_message_hdr *msg,
+			uint32_t service_type, uint8_t transaction_type,
+			uint16_t tid, uint8_t client, uint16_t overall_length,
+			qmi_debug_func_t function, void *user_data)
 {
-	const struct qmi_mux_hdr *hdr;
-	const struct qmi_message_hdr *msg;
 	const char *service;
-	const void *ptr;
+	const void *ptr = ((const void *) msg) + QMI_MESSAGE_HDR_SIZE;
 	uint16_t offset;
 	char strbuf[72 + 16], *str;
 	bool pending_print = false;
+	const char *transaction_type_string;
 
-	if (!function || !len)
+	if (!function)
 		return;
 
-	hdr = buf;
-
 	str = strbuf;
-	service = __service_type_to_string(hdr->service);
+	service = __service_type_to_string(service_type);
 	if (service)
 		str += sprintf(str, "%c   %s", dir, service);
 	else
-		str += sprintf(str, "%c   %d", dir, hdr->service);
+		str += sprintf(str, "%c   %d", dir, service_type);
 
-	if (hdr->service == QMI_SERVICE_CONTROL) {
-		const struct qmi_control_hdr *ctl;
-		const char *type;
-
-		ctl = buf + QMI_MUX_HDR_SIZE;
-		msg = buf + QMI_MUX_HDR_SIZE + QMI_CONTROL_HDR_SIZE;
-		ptr = buf + QMI_MUX_HDR_SIZE + QMI_CONTROL_HDR_SIZE +
-							QMI_MESSAGE_HDR_SIZE;
-
-		switch (ctl->type) {
-		case 0x00:
-			type = "_req";
-			break;
-		case 0x01:
-			type = "_resp";
-			break;
-		case 0x02:
-			type = "_ind";
-			break;
-		default:
-			type = "";
-			break;
-		}
-
-		str += sprintf(str, "%s msg=%d len=%d", type,
-					L_LE16_TO_CPU(msg->message),
-					L_LE16_TO_CPU(msg->length));
-
-		str += sprintf(str, " [client=%d,type=%d,tid=%d,len=%d]",
-					hdr->client, ctl->type,
-					ctl->transaction,
-					L_LE16_TO_CPU(hdr->length));
-	} else {
-		const struct qmi_service_hdr *srv;
-		const char *type;
-
-		srv = buf + QMI_MUX_HDR_SIZE;
-		msg = buf + QMI_MUX_HDR_SIZE + QMI_SERVICE_HDR_SIZE;
-		ptr = buf + QMI_MUX_HDR_SIZE + QMI_SERVICE_HDR_SIZE +
-							QMI_MESSAGE_HDR_SIZE;
-
-		switch (srv->type) {
-		case 0x00:
-			type = "_req";
-			break;
-		case 0x02:
-			type = "_resp";
-			break;
-		case 0x04:
-			type = "_ind";
-			break;
-		default:
-			type = "";
-			break;
-		}
-
-		str += sprintf(str, "%s msg=%d len=%d", type,
-					L_LE16_TO_CPU(msg->message),
-					L_LE16_TO_CPU(msg->length));
-
-		str += sprintf(str, " [client=%d,type=%d,tid=%d,len=%d]",
-					hdr->client, srv->type,
-					L_LE16_TO_CPU(srv->transaction),
-					L_LE16_TO_CPU(hdr->length));
+	switch (transaction_type) {
+	case 0x00:
+		transaction_type_string = "_req";
+		break;
+	case 0x01:
+		transaction_type_string = "_resp";
+		break;
+	case 0x02:
+		transaction_type_string = "_ind";
+		break;
+	default:
+		transaction_type_string = "";
+		break;
 	}
+
+	str += sprintf(str, "%s msg=%d len=%d", transaction_type_string,
+				L_LE16_TO_CPU(msg->message),
+				L_LE16_TO_CPU(msg->length));
+
+	str += sprintf(str, " [client=%d,type=%d,tid=%d,len=%d]",
+				client, transaction_type, tid, overall_length);
 
 	function(strbuf, user_data);
 
@@ -665,6 +617,61 @@ static void __debug_msg(const char dir, const void *buf, size_t len,
 
 	if (pending_print)
 		function(strbuf, user_data);
+}
+
+static void __qmux_debug_msg(const char dir, const void *buf, size_t len,
+				qmi_debug_func_t function, void *user_data)
+{
+	const struct qmi_mux_hdr *hdr;
+	const struct qmi_message_hdr *msg;
+	uint8_t transaction_type;
+	uint16_t tid;
+
+	if (!len)
+		return;
+
+	hdr = buf;
+
+	if (hdr->service == QMI_SERVICE_CONTROL) {
+		const struct qmi_control_hdr *ctl;
+
+		ctl = buf + QMI_MUX_HDR_SIZE;
+		msg = buf + QMI_MUX_HDR_SIZE + QMI_CONTROL_HDR_SIZE;
+
+		transaction_type = ctl->type;
+		tid = ctl->transaction;
+	} else {
+		const struct qmi_service_hdr *srv;
+
+		srv = buf + QMI_MUX_HDR_SIZE;
+		msg = buf + QMI_MUX_HDR_SIZE + QMI_SERVICE_HDR_SIZE;
+
+		transaction_type = srv->type;
+		tid = L_LE16_TO_CPU(srv->transaction);
+	}
+
+	__debug_msg(dir, msg, hdr->service, transaction_type, tid, hdr->client,
+			L_LE16_TO_CPU(hdr->length), function, user_data);
+}
+
+static void __qrtr_debug_msg(const char dir, const void *buf, size_t len,
+				uint16_t service_type,
+				qmi_debug_func_t function, void *user_data)
+{
+	const struct qmi_service_hdr *srv;
+	const struct qmi_message_hdr *msg;
+	uint16_t tid;
+
+	if (!len)
+		return;
+
+	srv = buf;
+	msg = buf + QMI_SERVICE_HDR_SIZE;
+
+	tid = L_LE16_TO_CPU(srv->transaction);
+
+	__debug_msg(dir, msg, service_type, srv->type, tid, 0, len,
+						function, user_data);
 }
 
 static void __debug_device(struct qmi_device *device,
@@ -723,13 +730,15 @@ static void wakeup_writer(struct qmi_device *device)
 	device->writer_active = true;
 }
 
-static uint16_t __request_submit(struct qmi_device *device,
-				struct qmi_request *req)
+static uint16_t __service_request_submit(struct qmi_device *device,
+						struct qmi_service *service,
+						struct qmi_request *req)
 {
 	struct qmi_service_hdr *hdr =
 		(struct qmi_service_hdr *) &req->data[QMI_MUX_HDR_SIZE];
 
 	req->tid = device->next_service_tid++;
+	req->group_id = service->group_id;
 
 	if (device->next_service_tid < 256)
 		device->next_service_tid = 256;
@@ -772,7 +781,7 @@ static unsigned int service_list_create_hash(uint16_t service_type,
 }
 
 static void handle_indication(struct qmi_device *device,
-			uint8_t service_type, uint8_t client_id,
+			uint32_t service_type, uint8_t client_id,
 			uint16_t message, uint16_t length, const void *data)
 {
 	struct qmi_service *service;
@@ -805,7 +814,7 @@ static void handle_indication(struct qmi_device *device,
 }
 
 static void __rx_message(struct qmi_device *device,
-				uint8_t service_type, uint8_t client_id,
+				uint32_t service_type, uint8_t client_id,
 				const void *buf)
 {
 	const struct qmi_service_hdr *service = buf;
@@ -1284,7 +1293,7 @@ static int qmi_device_qmux_write(struct qmi_device *device,
 	l_util_hexdump(false, req->data, bytes_written,
 			device->debug_func, device->debug_data);
 
-	__debug_msg(' ', req->data, bytes_written,
+	__qmux_debug_msg(' ', req->data, bytes_written,
 				device->debug_func, device->debug_data);
 
 	hdr = (struct qmi_mux_hdr *) req->data;
@@ -1371,7 +1380,7 @@ static bool received_qmux_data(struct l_io *io, void *user_data)
 		if (bytes_read - offset < len)
 			break;
 
-		__debug_msg(' ', buf + offset, len,
+		__qmux_debug_msg(' ', buf + offset, len,
 				qmux->super.debug_func, qmux->super.debug_data);
 
 		msg = buf + offset + QMI_MUX_HDR_SIZE;
@@ -1945,6 +1954,48 @@ struct qmi_device_qrtr {
 	struct l_idle *shutdown_idle;
 };
 
+static int qmi_device_qrtr_write(struct qmi_device *device,
+					struct qmi_request *req)
+{
+	struct sockaddr_qrtr addr;
+	uint8_t *data;
+	uint16_t len;
+	socklen_t addr_len = sizeof(addr);
+	int rc;
+	ssize_t bytes_written;
+	int fd = l_io_get_fd(device->io);
+
+	/* Skip the QMUX header */
+	data = req->data + QMI_MUX_HDR_SIZE;
+	len = req->len - QMI_MUX_HDR_SIZE;
+
+	rc = getsockname(fd, (struct sockaddr *) &addr, &addr_len);
+	if (rc != 0) {
+		DBG("getsockname failed: %s", strerror(errno));
+		return -errno;
+	}
+
+	addr.sq_node = req->info.qrtr_node;
+	addr.sq_port = req->info.qrtr_port;
+	bytes_written = sendto(fd, data, len, 0, (struct sockaddr *) &addr,
+							addr_len);
+	if (bytes_written < 0) {
+		DBG("Failure sending data: %s", strerror(errno));
+		return -errno;
+	}
+
+	l_util_hexdump(false, data, bytes_written,
+			device->debug_func, device->debug_data);
+
+	__qrtr_debug_msg(' ', data, bytes_written,
+			req->info.service_type, device->debug_func,
+			device->debug_data);
+
+	l_queue_push_tail(device->service_queue, req);
+
+	return 0;
+}
+
 static void qrtr_debug_ctrl_request(const struct qrtr_ctrl_pkt *packet,
 					qmi_debug_func_t function,
 					void *user_data)
@@ -1967,16 +2018,21 @@ static void qrtr_debug_ctrl_request(const struct qrtr_ctrl_pkt *packet,
 	function(strbuf, user_data);
 }
 
-static void qrtr_handle_control_packet(struct qmi_device_qrtr *qrtr,
-					const struct qrtr_ctrl_pkt *packet)
+static void qrtr_received_control_packet(struct qmi_device *device,
+						unsigned char *buf, size_t len)
 {
-	struct qmi_device *device = &qrtr->super;
+	struct qrtr_ctrl_pkt *packet = (struct qrtr_ctrl_pkt *) buf;
 	uint32_t cmd;
 	uint32_t type;
 	uint32_t instance;
 	uint32_t version;
 	uint32_t node;
 	uint32_t port;
+
+	if (len < sizeof(*packet)) {
+		DBG("qrtr packet is too small");
+		return;
+	}
 
 	qrtr_debug_ctrl_request(packet, device->debug_func,
 				device->debug_data);
@@ -2023,22 +2079,32 @@ static void qrtr_handle_control_packet(struct qmi_device_qrtr *qrtr,
 	}
 }
 
-static void qrtr_handle_packet(struct qmi_device_qrtr *qrtr, uint32_t sending_port,
-				const void *buf, ssize_t len)
+static void qrtr_received_service_message(struct qmi_device *device,
+			uint32_t port, const unsigned char *buf, ssize_t len)
 {
-	const struct qrtr_ctrl_pkt *packet = buf;
+	const struct l_queue_entry *entry;
+	uint32_t service_type = 0;
 
-	if (sending_port != QRTR_PORT_CTRL) {
-		DBG("Receive of service data is not implemented");
+	for (entry = l_queue_get_entries(device->service_infos);
+				entry; entry = entry->next) {
+		struct qmi_service_info *info = entry->data;
+
+		if (info->qrtr_port == port) {
+			service_type = info->service_type;
+			break;
+		}
+	}
+
+	if (!service_type) {
+		DBG("Received packet from unknown service on port %d",
+			port);
 		return;
 	}
 
-	if ((unsigned long) len < sizeof(*packet)) {
-		DBG("qrtr control packet is too small");
-		return;
-	}
+	__qrtr_debug_msg(' ', buf, len, service_type,
+				device->debug_func, device->debug_data);
 
-	qrtr_handle_control_packet(qrtr, packet);
+	__rx_message(device, service_type, 0, buf);
 }
 
 static bool qrtr_received_data(struct l_io *io, void *user_data)
@@ -2052,7 +2118,7 @@ static bool qrtr_received_data(struct l_io *io, void *user_data)
 	addr_size = sizeof(addr);
 	bytes_read = recvfrom(l_io_get_fd(qrtr->super.io), buf, sizeof(buf), 0,
 				(struct sockaddr *) &addr, &addr_size);
-	DBG("Received %zd bytes from Node: %d Port: 0x%x", bytes_read,
+	DBG("Received %zd bytes from Node: %d Port: %d", bytes_read,
 		addr.sq_node, addr.sq_port);
 
 	if (bytes_read < 0)
@@ -2061,7 +2127,11 @@ static bool qrtr_received_data(struct l_io *io, void *user_data)
 	l_util_hexdump(true, buf, bytes_read, qrtr->super.debug_func,
 			qrtr->super.debug_data);
 
-	qrtr_handle_packet(qrtr, addr.sq_port, buf, bytes_read);
+	if (addr.sq_port == QRTR_PORT_CTRL)
+		qrtr_received_control_packet(&qrtr->super, buf, bytes_read);
+	else
+		qrtr_received_service_message(&qrtr->super, addr.sq_port,
+							buf, bytes_read);
 
 	return true;
 }
@@ -2162,7 +2232,7 @@ static void qmi_device_qrtr_destroy(struct qmi_device *device)
 }
 
 static const struct qmi_device_ops qrtr_ops = {
-	.write = NULL,
+	.write = qmi_device_qrtr_write,
 	.discover = qmi_device_qrtr_discover,
 	.client_create = NULL,
 	.client_release = NULL,
@@ -2712,7 +2782,7 @@ uint16_t qmi_service_send(struct qmi_service *service,
 	data->user_data = user_data;
 	data->destroy = destroy;
 
-	req = __service_request_alloc(&service->info, service->group_id,
+	req = __service_request_alloc(&service->info,
 					service->client_id, message,
 					param ? param->data : NULL,
 					param ? param->length : 0,
@@ -2720,7 +2790,7 @@ uint16_t qmi_service_send(struct qmi_service *service,
 
 	qmi_param_free(param);
 
-	tid = __request_submit(device, req);
+	tid = __service_request_submit(device, service, req);
 
 	return tid;
 }
