@@ -46,8 +46,15 @@
 typedef void (*qmi_message_func_t)(uint16_t message, uint16_t length,
 					const void *buffer, void *user_data);
 
+enum discovery_type {
+	DISCOVERY_TYPE_QMUX_CLIENT_CREATE_DATA,
+	DISCOVERY_TYPE_DISCOVER,
+	DISCOVERY_TYPE_SERVICE_CREATE_SHARED,
+};
+
 struct discovery {
 	qmi_destroy_func_t destroy;
+	enum discovery_type type;
 };
 
 struct qmi_service_info {
@@ -1651,6 +1658,7 @@ static int qmi_device_qmux_discover(struct qmi_device *device,
 	data = l_new(struct discover_data, 1);
 
 	data->super.destroy = discover_data_free;
+	data->super.type = DISCOVERY_TYPE_DISCOVER;
 	data->device = device;
 	data->func = func;
 	data->user_data = user_data;
@@ -1790,6 +1798,7 @@ static int qmi_device_qmux_client_create(struct qmi_device *device,
 	data = l_new(struct qmux_client_create_data, 1);
 
 	data->super.destroy = qmux_client_create_data_free;
+	data->super.type = DISCOVERY_TYPE_QMUX_CLIENT_CREATE_DATA;
 	data->device = device;
 	data->type = service_type;
 	data->func = func;
@@ -2045,8 +2054,17 @@ static void qrtr_received_control_packet(struct qmi_device *device,
 		DBG("Initial service discovery has completed");
 
 		data = l_queue_peek_head(device->discovery_queue);
-		DISCOVERY_DONE(data, data->user_data);
+		if (!data) {
+			DBG("discovery_queue is empty"); /* likely a timeout */
+			return;
+		} else if (data->super.type != DISCOVERY_TYPE_DISCOVER) {
+			/* The first client action should be discover */
+			DBG("discovery_queue head type is not discovery: %d",
+				data->super.type);
+			return;
+		}
 
+		DISCOVERY_DONE(data, data->user_data);
 		return;
 	}
 
@@ -2164,6 +2182,7 @@ static int qmi_device_qrtr_discover(struct qmi_device *device,
 	data = l_new(struct discover_data, 1);
 
 	data->super.destroy = discover_data_free;
+	data->super.type = DISCOVERY_TYPE_DISCOVER;
 	data->device = device;
 	data->func = func;
 	data->user_data = user_data;
@@ -2575,6 +2594,7 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 		data = l_new(struct service_create_shared_data, 1);
 
 		data->super.destroy = service_create_shared_data_free;
+		data->super.type = DISCOVERY_TYPE_SERVICE_CREATE_SHARED;
 		data->device = device;
 		data->func = func;
 		data->user_data = user_data;
@@ -2616,6 +2636,7 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 		data = l_new(struct service_create_shared_data, 1);
 
 		data->super.destroy = service_create_shared_data_free;
+		data->super.type = DISCOVERY_TYPE_SERVICE_CREATE_SHARED;
 		data->device = device;
 		data->func = func;
 		data->user_data = user_data;
