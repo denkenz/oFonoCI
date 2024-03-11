@@ -2573,6 +2573,15 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 	if (!device->ops->client_create) {
 		struct service_create_shared_data *data;
 
+		data = l_new(struct service_create_shared_data, 1);
+
+		data->super.destroy = service_create_shared_data_free;
+		data->super.type = DISCOVERY_TYPE_SERVICE_CREATE_SHARED;
+		data->device = device;
+		data->func = func;
+		data->user_data = user_data;
+		data->destroy = destroy;
+
 		/*
 		 * The hash id is simply the service type in this case. There
 		 * is no "pending" state for discovery and no client id.
@@ -2589,18 +2598,11 @@ bool qmi_service_create_shared(struct qmi_device *device, uint16_t type,
 			service = service_create(device, info, 0);
 			l_hashmap_insert(device->service_list,
 					L_UINT_TO_PTR(type_val), service);
-		}
 
-		data = l_new(struct service_create_shared_data, 1);
+			data->service = service; /* ref_count starts at 1 */
+		} else
+			data->service = qmi_service_ref(service);
 
-		data->super.destroy = service_create_shared_data_free;
-		data->super.type = DISCOVERY_TYPE_SERVICE_CREATE_SHARED;
-		data->device = device;
-		data->func = func;
-		data->user_data = user_data;
-		data->destroy = destroy;
-
-		data->service = qmi_service_ref(service);
 		data->idle = l_idle_create(service_create_shared_reply,
 							data, NULL);
 
