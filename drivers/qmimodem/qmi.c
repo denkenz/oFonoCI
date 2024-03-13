@@ -1948,6 +1948,7 @@ struct qmi_device *qmi_device_new_qmux(const char *device)
 
 struct qmi_device_qrtr {
 	struct qmi_device super;
+	uint32_t control_node;
 	qmi_shutdown_func_t shutdown_func;
 	void *shutdown_user_data;
 	qmi_destroy_func_t shutdown_destroy;
@@ -2148,10 +2149,11 @@ static int qmi_device_qrtr_discover(struct qmi_device *device,
 					void *user_data,
 					qmi_destroy_func_t destroy)
 {
+	struct qmi_device_qrtr *qrtr =
+		l_container_of(device, struct qmi_device_qrtr, super);
 	struct discover_data *data;
 	struct qrtr_ctrl_pkt packet;
 	struct sockaddr_qrtr addr;
-	socklen_t addr_len;
 	int rc;
 	ssize_t bytes_written;
 	int fd;
@@ -2171,32 +2173,16 @@ static int qmi_device_qrtr_discover(struct qmi_device *device,
 
 	fd = l_io_get_fd(device->io);
 
-	/*
-	 * The control node is configured by the system. Use getsockname to
-	 * get its value.
-	 */
-	addr_len = sizeof(addr);
-	rc = getsockname(fd, (struct sockaddr *) &addr, &addr_len);
-	if (rc) {
-		DBG("getsockname failed: %s", strerror(errno));
-		rc = -errno;
-		goto error;
-	}
-
-	if (addr.sq_family != AF_QIPCRTR || addr_len != sizeof(addr)) {
-		DBG("Unexpected sockaddr from getsockname. family: %d size: %d",
-			addr.sq_family, addr_len);
-		rc = -EIO;
-		goto error;
-	}
-
+	memset(&addr, 0, sizeof(addr));
+	addr.sq_family = AF_QIPCRTR;
+	addr.sq_node = qrtr->control_node;
 	addr.sq_port = QRTR_PORT_CTRL;
 	memset(&packet, 0, sizeof(packet));
 	packet.cmd = L_CPU_TO_LE32(QRTR_TYPE_NEW_LOOKUP);
 
 	bytes_written = sendto(fd, &packet,
 				sizeof(packet), 0,
-				(struct sockaddr *) &addr, addr_len);
+				(struct sockaddr *) &addr, sizeof(addr));
 	if (bytes_written < 0) {
 		DBG("Failure sending data: %s", strerror(errno));
 		rc = -errno;
@@ -2236,16 +2222,14 @@ static const struct qmi_device_ops qrtr_ops = {
 	.destroy = qmi_device_qrtr_destroy,
 };
 
-struct qmi_device *qmi_device_new_qrtr(void)
+/* This method is separated so unit tests can inject dependencies. */
+struct qmi_device *qmi_device_new_qrtr_private(int fd, uint32_t control_node)
 {
 	struct qmi_device_qrtr *qrtr;
-	int fd;
-
-	fd = socket(AF_QIPCRTR, SOCK_DGRAM, 0);
-	if (fd < 0)
-		return NULL;
 
 	qrtr = l_new(struct qmi_device_qrtr, 1);
+
+	qrtr->control_node = control_node;
 
 	if (qmi_device_init(&qrtr->super, fd, &qrtr_ops) < 0) {
 		close(fd);
@@ -2256,6 +2240,44 @@ struct qmi_device *qmi_device_new_qrtr(void)
 	l_io_set_read_handler(qrtr->super.io, qrtr_received_data, qrtr, NULL);
 
 	return &qrtr->super;
+}
+
+struct qmi_device *qmi_device_new_qrtr(void)
+{
+	int fd;
+	struct sockaddr_qrtr addr;
+	socklen_t addrlen;
+	struct qmi_device *device;
+
+	fd = socket(AF_QIPCRTR, SOCK_DGRAM, 0);
+	if (fd < 0)
+		return NULL;
+
+	/*
+	 * The control node is configured by the system. Use getsockname to
+	 * get its value.
+	 */
+	addrlen = sizeof(addr);
+	if (getsockname(fd, (struct sockaddr *) &addr, &addrlen) == -1) {
+		DBG("getsockname failed: %s", strerror(errno));
+		goto error;
+	}
+
+	if (addr.sq_family != AF_QIPCRTR || addrlen != sizeof(addr)) {
+		DBG("Unexpected sockaddr from getsockname. family: %d size: %d",
+			addr.sq_family, addrlen);
+		goto error;
+	}
+
+	device = qmi_device_new_qrtr_private(fd, addr.sq_node);
+	if (!device)
+		goto error;
+
+	return device;
+
+error:
+	close(fd);
+	return NULL;
 }
 
 struct qmi_param *qmi_param_new(void)
