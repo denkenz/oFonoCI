@@ -107,6 +107,7 @@ static void get_response_common_cb(gboolean ok, GAtResult *result,
 	int str;
 	unsigned char access[3];
 	unsigned char file_status;
+	gboolean nb_found = FALSE;
 
 	decode_at_error(&error, g_at_result_final_response(result));
 
@@ -117,11 +118,14 @@ static void get_response_common_cb(gboolean ok, GAtResult *result,
 
 	g_at_result_iter_init(&iter, result);
 
-	if (!g_at_result_iter_next(&iter, prefix))
-		goto error;
+	while (!nb_found) {
+		if (!g_at_result_iter_next(&iter, prefix))
+			goto error;
 
-	g_at_result_iter_next_number(&iter, &sw1);
-	g_at_result_iter_next_number(&iter, &sw2);
+		nb_found = g_at_result_iter_next_number(&iter, &sw1);
+		if (nb_found)
+			nb_found = g_at_result_iter_next_number(&iter, &sw2);
+	}
 
 	if (!g_at_result_iter_next_hexstring(&iter, &response, &len) ||
 			(sw1 != 0x90 && sw1 != 0x91 && sw1 != 0x92) ||
