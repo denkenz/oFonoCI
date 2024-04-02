@@ -33,6 +33,9 @@
 
 #include <glib.h>
 #include <ell/ell.h>
+#include <linux/if.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 
 #define OFONO_API_SUBJECT_TO_CHANGE
 #include <ofono/plugin.h>
@@ -43,6 +46,7 @@ enum modem_type {
 	MODEM_TYPE_USB,
 	MODEM_TYPE_SERIAL,
 	MODEM_TYPE_PCIE,
+	MODEM_TYPE_EMBEDDED,
 };
 
 struct modem_info {
@@ -234,11 +238,147 @@ static int setup_qmi(struct modem_info *modem, const struct device_info *qmi,
 	case MODEM_TYPE_PCIE:
 		ofono_modem_set_string(modem->modem, "Bus", "pcie");
 		break;
+	case MODEM_TYPE_EMBEDDED:
+		ofono_modem_set_string(modem->modem, "Bus", "embedded");
+		break;
 	case MODEM_TYPE_SERIAL:
 		break;
 	}
 
 	return 0;
+}
+
+static gboolean setup_gobi_qrtr_premux(struct modem_info *modem,
+					const char *name, int premux_index)
+{
+	const char *rmnet_data_prefix = "rmnet_data";
+	int rmnet_data_prefix_length = strlen(rmnet_data_prefix);
+	char buf[256];
+	int r;
+	uint32_t data_id;
+	uint32_t mux_id;
+
+	r = l_safe_atou32(name + rmnet_data_prefix_length, &data_id);
+	if (r < 0)
+		return FALSE;
+
+	mux_id = data_id + 1;
+
+	DBG("Adding premux interface %s, mux id: %d", name, mux_id);
+	sprintf(buf, "PremuxInterface%d", premux_index);
+	ofono_modem_set_string(modem->modem, buf, name);
+	sprintf(buf, "PremuxInterface%dMuxId", premux_index);
+	ofono_modem_set_integer(modem->modem, buf, mux_id);
+
+	return TRUE;
+}
+
+/*
+ * The following rmnet declarations are contained in msm_rmnet.h which is not
+ * commonly provided in Linux distributions.
+ */
+
+#define RMNET_IOCTL_EXTENDED 0x000089FD
+#define RMNET_IOCTL_GET_EPID 0x0003
+
+/*
+ * This is the minimal set of fields needed to get the endpoint ID. The actual
+ * structure has many more union members.
+ */
+struct rmnet_ioctl_extended_s {
+	uint32_t   extended_ioctl;
+
+	union {
+		uint32_t data;
+
+		/* Ensure the struct is at least as large as the real one. */
+		uint8_t buffer[32];
+	};
+};
+
+static int get_rmnet_endpoint_id(const char *if_name, uint32_t *id)
+{
+	_auto_(close) int fd = -1;
+	int r;
+	struct rmnet_ioctl_extended_s ext_ioctl_arg;
+	struct ifreq ifr;
+
+	fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (fd < 0) {
+		ofono_warn("Failed to open socket. %s", strerror(errno));
+		return -errno;
+	}
+
+	memset(&ext_ioctl_arg, 0, sizeof(ext_ioctl_arg));
+	ext_ioctl_arg.extended_ioctl = RMNET_IOCTL_GET_EPID;
+
+	memset(&ifr, 0, sizeof(ifr));
+	l_strlcpy(ifr.ifr_name, if_name, sizeof(ifr.ifr_name));
+	ifr.ifr_ifru.ifru_data = &ext_ioctl_arg;
+
+	r = ioctl(fd, RMNET_IOCTL_EXTENDED, &ifr);
+	if (r == -1) {
+		ofono_warn("Failed to execute RMNET_IOCTL_EXTENDED ioctl. %s",
+						strerror(errno));
+		return -errno;
+	}
+
+	*id = ext_ioctl_arg.data;
+
+	return 0;
+}
+
+static gboolean setup_gobi_qrtr(struct modem_info *modem)
+{
+	const struct device_info *ipa_info = NULL;
+	int premux_count = 0;
+	int r;
+	GSList *list;
+
+	DBG("%s", modem->syspath);
+
+	for (list = modem->devices; list; list = list->next) {
+		struct device_info *info = list->data;
+		const char *name;
+
+		name = udev_device_get_sysname(info->udev_device);
+		if (l_str_has_prefix(name, "rmnet_ipa")) {
+			uint32_t endpoint_id = 0;
+
+			if (!get_rmnet_endpoint_id(name, &endpoint_id)) {
+				DBG("%s: endpoint_id: %d", name, endpoint_id);
+				info->number = g_strdup_printf("%d",
+								endpoint_id);
+			}
+
+			ipa_info = info;
+
+		} else if (l_str_has_prefix(name, "rmnet_data")) {
+			int premux_index = premux_count + 1;
+
+			if (setup_gobi_qrtr_premux(modem, name, premux_index))
+				premux_count++;
+		}
+	}
+
+	if (premux_count < 3) {
+		DBG("Not enough rmnet_data interfaces found");
+		return FALSE;
+	}
+
+	ofono_modem_set_integer(modem->modem, "NumPremuxInterfaces",
+							premux_count);
+
+	if (!ipa_info) {
+		DBG("No rmnet_ipa interface found");
+		return FALSE;
+	}
+
+	r = setup_qmi(modem, ipa_info, ipa_info);
+	if (r < 0)
+		return FALSE;
+
+	return TRUE;
 }
 
 static gboolean setup_gobi(struct modem_info *modem)
@@ -1594,6 +1734,7 @@ static struct {
 	{ "wavecom",	setup_wavecom		},
 	{ "tc65",	setup_tc65		},
 	{ "ehs6",	setup_ehs6		},
+	{ "gobiqrtr",	setup_gobi_qrtr		},
 	{ }
 };
 
@@ -1644,6 +1785,7 @@ static void destroy_modem(gpointer data)
 	switch (modem->type) {
 	case MODEM_TYPE_USB:
 	case MODEM_TYPE_PCIE:
+	case MODEM_TYPE_EMBEDDED:
 		for (list = modem->devices; list; list = list->next) {
 			struct device_info *info = list->data;
 
@@ -1687,6 +1829,9 @@ static gboolean check_remove(gpointer key, gpointer value, gpointer user_data)
 	case MODEM_TYPE_SERIAL:
 		if (g_strcmp0(modem->serial->devpath, devpath) == 0)
 			return TRUE;
+		break;
+	case MODEM_TYPE_EMBEDDED:
+		/* Embedded modems cannot be removed. */
 		break;
 	}
 
@@ -2133,6 +2278,26 @@ static void check_pci_device(struct udev_device *device)
 			device, kernel_driver);
 }
 
+static void check_net_device(struct udev_device *device)
+{
+	char path[32];
+	const char *name;
+	const char *iflink;
+
+	name = udev_device_get_sysname(device);
+	if (!l_str_has_prefix(name, "rmnet_"))
+		return;
+
+	iflink = udev_device_get_sysattr_value(device, "iflink");
+	if (!iflink)
+		return;
+
+	/* Collect all rmnet devices with this iflink under a common path. */
+	sprintf(path, "/embedded/qrtr/%s", iflink);
+	add_device(path, NULL, "gobiqrtr", NULL, NULL, MODEM_TYPE_EMBEDDED,
+							device, "qrtr");
+}
+
 static void check_device(struct udev_device *device)
 {
 	const char *bus;
@@ -2149,6 +2314,8 @@ static void check_device(struct udev_device *device)
 		check_usb_device(device);
 	else if (g_str_equal(bus, "pci") == TRUE)
 		check_pci_device(device);
+	else if (g_str_equal(bus, "net") == TRUE)
+		check_net_device(device);
 	else
 		add_serial_device(device);
 
