@@ -1002,6 +1002,21 @@ dundee_dundee_SOURCES = $(dundee_common_sources) plugins/bluez5.c \
 endif
 endif
 
+if BPF
+bin_PROGRAMS = monitor/wwantrace
+
+monitor/wwantrace.bpf.o: monitor/wwantrace.bpf.c
+	clang -g -O2 -target bpf -c monitor/wwantrace.bpf.c -o monitor/wwantrace.tmp.bpf.o
+	bpftool gen object monitor/wwantrace.bpf.o monitor/wwantrace.tmp.bpf.o
+
+monitor/wwantrace.skel.h: monitor/wwantrace.bpf.o
+	bpftool gen skeleton monitor/wwantrace.bpf.o > monitor/wwantrace.skel.h
+
+monitor_wwantrace_SOURCES = monitor/wwantrace.c monitor/wwantrace.h \
+				monitor/wwantrace.skel.h
+monitor_wwantrace_LDADD = $(ell_ldadd) $(LIBBPF_LIBS)
+endif
+
 noinst_PROGRAMS += gatchat/gsmdial gatchat/test-server gatchat/test-qcdm
 
 gatchat_gsmdial_SOURCES = gatchat/gsmdial.c $(gatchat_sources)

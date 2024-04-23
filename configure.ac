@@ -284,6 +284,17 @@ fi
 AC_DEFINE_UNQUOTED(CONFIGDIR, "${configdir}",
 			[Directory for the configuration files])
 
+AC_ARG_ENABLE([bpf], AS_HELP_STRING([--disable-bpf],
+				[don't enable bpf based tracing]),
+					[enable_bpf=${enableval}])
+if (test "${enable_bpf}" != "no"); then
+	PKG_CHECK_MODULES(LIBBPF, libbpf, dummy=yes,
+			AC_MSG_ERROR(libbpf is required))
+	AC_SUBST(LIBBPF_CFLAGS)
+	AC_SUBST(LIBBPF_LIBS)
+fi
+AM_CONDITIONAL(BPF, test "${enable_bpf}" != "no")
+
 AC_CONFIG_FILES(Makefile include/version.h src/ofono.service ofono.pc \
 		dundee/dundee.service)
 
