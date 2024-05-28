@@ -1343,8 +1343,8 @@ static void quectel_pre_sim(struct ofono_modem *modem)
 
 	ofono_devinfo_create(modem, data->vendor, "atmodem", data->aux);
 
-	ofono_voicecall_create(modem, data->vendor, "atmodem", data->aux);
 	sim = ofono_sim_create(modem, data->vendor, "atmodem", data->aux);
+	ofono_voicecall_create(modem, data->vendor, "atmodem", data->aux);
 
 	if (data->sim_locked || data->sim_ready)
 		ofono_sim_inserted_notify(sim, true);
