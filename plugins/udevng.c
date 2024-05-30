@@ -2527,6 +2527,8 @@ static void check_device(struct udev_device *device)
 		check_wwan_device(device);
 	else if (l_streq0(subsystem, "mhi"))
 		check_mhi_device(device);
+	else if (l_streq0(bus, "usb"))
+		check_usb_device(device);
 	else
 		add_serial_device(device);
 }
