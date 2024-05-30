@@ -2509,8 +2509,8 @@ static void check_device(struct udev_device *device)
 	const char *subsystem = udev_device_get_subsystem(device);
 	const char *bus = udev_device_get_property_value(device, "ID_BUS");
 
-	if (l_streq0(subsystem, "net")) {
-		/* Handle USB-connected network devices in check_usb_device */
+	if (l_streq0(subsystem, "net") || l_streq0(subsystem, "tty")) {
+		/* Handle USB-connected net/tty devices in check_usb_device */
 		if (l_streq0(bus, "usb"))
 			check_usb_device(device);
 		else
