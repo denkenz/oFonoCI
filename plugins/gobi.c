@@ -748,14 +748,6 @@ static void gobi_post_sim(struct ofono_modem *modem)
 
 	ofono_lte_create(modem, 0, "qmimodem", data->device);
 
-	if (data->features & GOBI_CAT)
-		ofono_stk_create(modem, 0, "qmimodem", data->device);
-	else if (data->features & GOBI_CAT_OLD)
-		ofono_stk_create(modem, 1, "qmimodem", data->device);
-
-	if (data->features & GOBI_PBM)
-		ofono_phonebook_create(modem, 0, "qmimodem", data->device);
-
 	if (data->features & GOBI_NAS)
 		ofono_radio_settings_create(modem, 0, "qmimodem", data->device);
 
