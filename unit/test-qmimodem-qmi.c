@@ -566,6 +566,32 @@ static void test_service_notification_independence(const void *data)
 	test_cleanup(info);
 }
 
+static void test_dedicated(const void *data)
+{
+	struct test_info *info = test_setup();
+	struct l_io *io;
+	uint32_t service_type;
+	struct qmi_service *service;
+
+	perform_lookup(info);
+
+	service_type = unique_service_type(0); /* Use the first service */
+	service = qmi_qrtr_node_get_dedicated_service(info->node, service_type);
+	assert(service);
+
+	io = l_io_new(info->service_fds[0]);
+	assert(io);
+	l_io_set_read_handler(io, received_data, info, NULL);
+
+	send_request_via_qmi(info, service);
+	send_response_to_client(info, io);
+
+	l_io_destroy(io);
+	qmi_service_free(service);
+
+	test_cleanup(info);
+}
+
 static void exit_if_qrtr_not_supported(void)
 {
 	int fd;
@@ -598,6 +624,7 @@ int main(int argc, char **argv)
 	l_test_add("QRTR notifications", test_notifications, NULL);
 	l_test_add("QRTR service notifications are independent",
 				test_service_notification_independence, NULL);
+	l_test_add("QRTR dedicated service", test_dedicated, NULL);
 	result = l_test_run();
 
 	__ofono_log_cleanup();
