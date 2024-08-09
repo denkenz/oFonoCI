@@ -773,6 +773,9 @@ static gboolean decode_deliver(const unsigned char *pdu, int len,
 	if ((len - offset) < expected)
 		return FALSE;
 
+	if (expected > sizeof(out->deliver.ud))
+		return FALSE;
+
 	memcpy(out->deliver.ud, pdu + offset, expected);
 
 	return TRUE;
