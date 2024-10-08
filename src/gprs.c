@@ -1613,7 +1613,7 @@ static gboolean on_lte(struct ofono_gprs *gprs)
 
 static void gprs_attached_update(struct ofono_gprs *gprs)
 {
-	ofono_bool_t attached;
+	ofono_bool_t attached, netreg_status;
 	int status = gprs->status;
 
 	if (on_lte(gprs))
@@ -1626,10 +1626,20 @@ static void gprs_attached_update(struct ofono_gprs *gprs)
 		 * result in detaching...
 		 */
 		attached = have_active_contexts(gprs);
-	else
-		attached = gprs->driver_attached &&
-			(status == NETWORK_REGISTRATION_STATUS_REGISTERED ||
-				status == NETWORK_REGISTRATION_STATUS_ROAMING);
+	else {
+		switch (status) {
+		case NETWORK_REGISTRATION_STATUS_REGISTERED:
+		case NETWORK_REGISTRATION_STATUS_REGISTERED_SMS_EUTRAN:
+		case NETWORK_REGISTRATION_STATUS_ROAMING:
+		case NETWORK_REGISTRATION_STATUS_ROAMING_SMS_EUTRAN:
+			netreg_status = true;
+			break;
+		default:
+			netreg_status = false;
+		}
+
+		attached = gprs->driver_attached && netreg_status;
+	}
 
 	if (attached == gprs->attached)
 		return;
@@ -2637,8 +2647,13 @@ void ofono_gprs_status_notify(struct ofono_gprs *gprs, int status)
 	if (gprs->flags & GPRS_FLAG_ATTACHING)
 		return;
 
-	if (status != NETWORK_REGISTRATION_STATUS_REGISTERED &&
-			status != NETWORK_REGISTRATION_STATUS_ROAMING) {
+	switch (status) {
+	case NETWORK_REGISTRATION_STATUS_REGISTERED:
+	case NETWORK_REGISTRATION_STATUS_REGISTERED_SMS_EUTRAN:
+	case NETWORK_REGISTRATION_STATUS_ROAMING:
+	case NETWORK_REGISTRATION_STATUS_ROAMING_SMS_EUTRAN:
+		break;
+	default:
 		ofono_gprs_detached_notify(gprs);
 		return;
 	}
