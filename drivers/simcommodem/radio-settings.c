@@ -33,6 +33,30 @@ struct radio_settings_data {
 	GAtChat *chat;
 };
 
+int r_mode_to_radio_access_mode(int r_mode)
+{
+	int mode;
+
+	switch (r_mode) {
+	case 2:
+		mode = OFONO_RADIO_ACCESS_MODE_ANY;
+		break;
+	case 13:
+		mode = OFONO_RADIO_ACCESS_MODE_GSM;
+		break;
+	case 14:
+		mode = OFONO_RADIO_ACCESS_MODE_UMTS;
+		break;
+	case 38:
+		mode = OFONO_RADIO_ACCESS_MODE_LTE;
+		break;
+	default:
+		return -1;
+	}
+
+	return mode;
+}
+
 static void cnmp_query_cb(gboolean ok, GAtResult *result, gpointer user_data)
 {
 	struct cb_data *cbd = user_data;
@@ -61,23 +85,9 @@ static void cnmp_query_cb(gboolean ok, GAtResult *result, gpointer user_data)
 
 	DBG("r_mode %d", r_mode);
 
-	switch (r_mode) {
-	case 2:
-		mode = OFONO_RADIO_ACCESS_MODE_ANY;
-		break;
-	case 13:
-		mode = OFONO_RADIO_ACCESS_MODE_GSM;
-		break;
-	case 14:
-		mode = OFONO_RADIO_ACCESS_MODE_UMTS;
-		break;
-	case 38:
-		mode = OFONO_RADIO_ACCESS_MODE_LTE;
-		break;
-	default:
-		CALLBACK_WITH_FAILURE(cb, -1, cbd->data);
-		return;
-	}
+	mode = r_mode_to_radio_access_mode(r_mode);
+	if (mode < 0)
+		goto error;
 
 	cb(&error, mode, cbd->data);
 
