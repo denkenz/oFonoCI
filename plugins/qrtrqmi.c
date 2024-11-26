@@ -42,13 +42,25 @@
 
 #include <drivers/qmimodem/qmi.h>
 #include <drivers/qmimodem/dms.h>
+#include <drivers/qmimodem/wda.h>
 #include <drivers/qmimodem/util.h>
+#include <drivers/qmimodem/common.h>
+#include "src/rmnet.h"
+
+#define MAX_CONTEXTS 4
+#define DEFAULT_DL_DATAGRAMS 32
+#define DEFAULT_DL_AGGREGATION_SIZE 32768
+#define DEFAULT_UL_AGGREGATION_SIZE 16384
 
 struct qrtrqmi_data {
 	struct qmi_qrtr_node *node;
 	struct qmi_service *dms;
+	struct qmi_service *wda;
 	int main_net_ifindex;
 	char main_net_name[IFNAMSIZ];
+	struct rmnet_ifinfo rmnet_interfaces[MAX_CONTEXTS];
+	uint8_t n_premux;
+	int rmnet_id;
 	bool have_voice : 1;
 };
 
@@ -120,6 +132,8 @@ static void qrtrqmi_deinit(struct qrtrqmi_data *data)
 {
 	qmi_service_free(data->dms);
 	data->dms = NULL;
+	qmi_service_free(data->wda);
+	data->wda = NULL;
 	qmi_qrtr_node_free(data->node);
 	data->node = NULL;
 }
@@ -132,8 +146,103 @@ static void qrtrqmi_remove(struct ofono_modem *modem)
 
 	ofono_modem_set_data(modem, NULL);
 
+	if (data->rmnet_id) {
+		rmnet_cancel(data->rmnet_id);
+		data->rmnet_id = 0;
+	}
+
 	qrtrqmi_deinit(data);
 	l_free(data);
+}
+
+static void rmnet_get_interfaces_cb(int error, unsigned int n_interfaces,
+					const struct rmnet_ifinfo *interfaces,
+					void *user_data)
+{
+	struct ofono_modem *modem = user_data;
+	struct qrtrqmi_data *data = ofono_modem_get_data(modem);
+	unsigned int i;
+
+	DBG("error: %d, n_interfaces: %u", error, n_interfaces);
+	data->rmnet_id = 0;
+
+	if (error)
+		goto error;
+
+	DBG("RMNet interfaces created:");
+	for (i = 0; i < n_interfaces; i++)
+		DBG("\t%s[%d], mux_id: %u",
+			interfaces[i].ifname, interfaces[i].ifindex,
+			interfaces[i].mux_id);
+
+	memcpy(data->rmnet_interfaces, interfaces,
+			sizeof(struct rmnet_ifinfo) * n_interfaces);
+	data->n_premux = n_interfaces;
+	ofono_modem_set_powered(modem, TRUE);
+	return;
+error:
+	qrtrqmi_deinit(data);
+	ofono_modem_set_powered(modem, FALSE);
+}
+
+static void set_data_format_cb(struct qmi_result *result, void *user_data)
+{
+	struct ofono_modem *modem = user_data;
+	struct qrtrqmi_data *data = ofono_modem_get_data(modem);
+	struct qmi_wda_data_format format;
+	int r;
+
+	DBG("");
+
+	if (qmi_result_set_error(result, NULL))
+		goto error;
+
+	r = qmi_wda_parse_data_format(result, &format);
+	if (r < 0)
+		goto error;
+
+	DBG("DL Aggregation Size: %u", format.dl_max_size);
+	DBG("DL Max Datagrams: %u", format.dl_max_datagrams);
+	DBG("DL Aggregation Protocol: %u", format.dl_aggregation_protocol);
+	DBG("UL Aggregation Protocol: %u", format.ul_aggregation_protocol);
+
+	data->rmnet_id = rmnet_get_interfaces(data->main_net_ifindex,
+						MAX_CONTEXTS,
+						rmnet_get_interfaces_cb,
+						modem, NULL);
+	if (data->rmnet_id > 0)
+		return;
+
+	ofono_error("Unable to request RMNet interfaces");
+error:
+	qrtrqmi_deinit(data);
+	ofono_modem_set_powered(modem, FALSE);
+}
+
+static void setup_data_format(struct ofono_modem *modem)
+{
+	struct qrtrqmi_data *data = ofono_modem_get_data(modem);
+	struct qmi_endpoint_info endpoint_info = {
+		.endpoint_type = QMI_DATA_ENDPOINT_TYPE_PCIE,
+		.interface_number = 0x04,
+	};
+	struct qmi_wda_data_format format = {
+		.ll_protocol = QMI_WDA_DATA_LINK_PROTOCOL_RAW_IP,
+		.dl_aggregation_protocol = QMI_WDA_AGGREGATION_PROTOCOL_QMAPV5,
+		.ul_aggregation_protocol = QMI_WDA_AGGREGATION_PROTOCOL_QMAPV5,
+		.dl_max_datagrams = DEFAULT_DL_DATAGRAMS,
+		.dl_max_size = DEFAULT_DL_AGGREGATION_SIZE,
+	};
+
+	DBG("%p", modem);
+
+	data->wda = qmi_qrtr_node_get_service(data->node, QMI_SERVICE_WDA);
+	if (qmi_wda_set_data_format(data->wda, &endpoint_info, &format,
+					set_data_format_cb, modem, NULL) > 0)
+		return;
+
+	qrtrqmi_deinit(data);
+	ofono_modem_set_powered(modem, FALSE);
 }
 
 static void power_reset_cb(struct qmi_result *result, void *user_data)
@@ -148,7 +257,7 @@ static void power_reset_cb(struct qmi_result *result, void *user_data)
 		return;
 	}
 
-	ofono_modem_set_powered(modem, TRUE);
+	setup_data_format(modem);
 }
 
 static void get_oper_mode_cb(struct qmi_result *result, void *user_data)
@@ -177,7 +286,7 @@ static void get_oper_mode_cb(struct qmi_result *result, void *user_data)
 
 		break;
 	default:
-		ofono_modem_set_powered(modem, TRUE);
+		setup_data_format(modem);
 		return;
 	}
 
@@ -196,6 +305,7 @@ static void lookup_done(void *user_data)
 	if (!qmi_qrtr_node_has_service(node, QMI_SERVICE_DMS) ||
 			!qmi_qrtr_node_has_service(node, QMI_SERVICE_UIM) ||
 			!qmi_qrtr_node_has_service(node, QMI_SERVICE_WDS) ||
+			!qmi_qrtr_node_has_service(node, QMI_SERVICE_WDA) ||
 			!qmi_qrtr_node_has_service(node, QMI_SERVICE_NAS))
 		goto error;
 
@@ -236,10 +346,15 @@ static int qrtrqmi_enable(struct ofono_modem *modem)
 static void power_disable_cb(struct qmi_result *result, void *user_data)
 {
 	struct ofono_modem *modem = user_data;
+	struct qrtrqmi_data *data = ofono_modem_get_data(modem);
 
 	DBG("");
 
-	qrtrqmi_deinit(ofono_modem_get_data(modem));
+	rmnet_del_interfaces(data->n_premux, data->rmnet_interfaces);
+	data->n_premux = 0;
+	memset(data->rmnet_interfaces, 0, sizeof(data->rmnet_interfaces));
+
+	qrtrqmi_deinit(data);
 	ofono_modem_set_powered(modem, FALSE);
 }
 
@@ -346,11 +461,8 @@ static void setup_gprs(struct ofono_modem *modem)
 {
 	struct qrtrqmi_data *data = ofono_modem_get_data(modem);
 	struct qmi_qrtr_node *node = data->node;
-	int n_premux = ofono_modem_get_integer(modem, "NumPremuxInterfaces");
 	struct ofono_gprs *gprs;
-	const char *interface;
-	char buf[256];
-	int i;
+	unsigned int i;
 
 	gprs = ofono_gprs_create(modem, 0, "qmimodem",
 			qmi_qrtr_node_get_service(node, QMI_SERVICE_WDS),
@@ -361,23 +473,10 @@ static void setup_gprs(struct ofono_modem *modem)
 		return;
 	}
 
-	/* Upstream driver default, single interface, single context */
-	if (!n_premux) {
-		interface = ofono_modem_get_string(modem, "NetworkInterface");
-		setup_gprs_context(0, interface, gprs);
-		return;
-	}
+	for (i = 0; i < data->n_premux; i++) {
+		struct rmnet_ifinfo *ifinfo = data->rmnet_interfaces + i;
 
-	for (i = 0; i < n_premux; i++) {
-		int mux_id;
-
-		sprintf(buf, "PremuxInterface%dMuxId", i + 1);
-		mux_id = ofono_modem_get_integer(modem, buf);
-
-		sprintf(buf, "PremuxInterface%d", i + 1);
-		interface = ofono_modem_get_string(modem, buf);
-
-		setup_gprs_context(mux_id, interface, gprs);
+		setup_gprs_context(ifinfo->mux_id, ifinfo->ifname, gprs);
 	}
 }
 
