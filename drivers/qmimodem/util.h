@@ -14,17 +14,20 @@ struct cb_data {
 	int ref;
 };
 
+static inline struct cb_data *cb_data_init(struct cb_data *cbd, void *cb,
+						void *data)
+{
+	cbd->cb = cb;
+	cbd->data = data;
+	cbd->user = NULL;
+	cbd->ref = 1;
+
+	return cbd;
+}
+
 static inline struct cb_data *cb_data_new(void *cb, void *data)
 {
-	struct cb_data *ret;
-
-	ret = l_new(struct cb_data, 1);
-	ret->cb = cb;
-	ret->data = data;
-	ret->user = NULL;
-	ret->ref = 1;
-
-	return ret;
+	return cb_data_init(l_new(struct cb_data, 1), cb, data);
 }
 
 static inline struct cb_data *cb_data_ref(struct cb_data *cbd)

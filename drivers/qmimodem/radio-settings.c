@@ -21,6 +21,12 @@
 struct settings_data {
 	struct qmi_service *nas;
 	struct qmi_service *dms;
+	unsigned int rat_mode_any;
+};
+
+struct rat_mode_any_data {
+	struct cb_data cbd;
+	unsigned int mode;
 };
 
 static void get_system_selection_pref_cb(struct qmi_result *result,
@@ -92,20 +98,20 @@ static void set_system_selection_pref_cb(struct qmi_result *result,
 	CALLBACK_WITH_SUCCESS(cb, cbd->data);
 }
 
-static void qmi_set_rat_mode(struct ofono_radio_settings *rs, unsigned int mode,
+static void _set_rat_mode(struct ofono_radio_settings *rs, unsigned int mode,
 			ofono_radio_settings_rat_mode_set_cb_t cb,
 			void *user_data)
 {
 	struct settings_data *data = ofono_radio_settings_get_data(rs);
 	struct cb_data *cbd = cb_data_new(cb, user_data);
-	uint16_t pref = QMI_NAS_RAT_MODE_PREF_ANY;
+	uint16_t pref = 0;
 	struct qmi_param *param;
 
 	DBG("");
 
 	switch (mode) {
 	case OFONO_RADIO_ACCESS_MODE_ANY:
-		pref = QMI_NAS_RAT_MODE_PREF_ANY;
+		pref = data->rat_mode_any;
 		break;
 	case OFONO_RADIO_ACCESS_MODE_GSM:
 		pref = QMI_NAS_RAT_MODE_PREF_GSM;
@@ -136,12 +142,13 @@ static void qmi_set_rat_mode(struct ofono_radio_settings *rs, unsigned int mode,
 	l_free(cbd);
 }
 
-static void get_caps_cb(struct qmi_result *result, void *user_data)
+static void get_rat_mode_any_cb(struct qmi_result *result, void *user_data)
 {
-	struct cb_data *cbd = user_data;
-	ofono_radio_settings_available_rats_query_cb_t cb = cbd->cb;
+	struct rat_mode_any_data *data = user_data;
+	struct cb_data *cbd = &data->cbd;
+	struct ofono_radio_settings *rs = cbd->user;
+	struct settings_data *rsd = ofono_radio_settings_get_data(rs);
 	const struct qmi_dms_device_caps *caps;
-	unsigned int available_rats;
 	uint16_t len;
 	uint8_t i;
 
@@ -154,17 +161,97 @@ static void get_caps_cb(struct qmi_result *result, void *user_data)
 	if (!caps)
 		goto error;
 
+	for (i = 0; i < caps->radio_if_count; i++) {
+		switch (caps->radio_if[i]) {
+		case QMI_DMS_RADIO_IF_GSM:
+			rsd->rat_mode_any |= QMI_NAS_RAT_MODE_PREF_GSM;
+			break;
+		case QMI_DMS_RADIO_IF_UMTS:
+			rsd->rat_mode_any |= QMI_NAS_RAT_MODE_PREF_UMTS;
+			break;
+		case QMI_DMS_RADIO_IF_LTE:
+			rsd->rat_mode_any |= QMI_NAS_RAT_MODE_PREF_LTE;
+			break;
+		}
+	}
+
+error:
+	/* last resort */
+	if (rsd->rat_mode_any == 0)
+		rsd->rat_mode_any = QMI_NAS_RAT_MODE_PREF_ANY;
+
+	_set_rat_mode(rs, data->mode, cbd->cb, cbd->data);
+}
+
+static bool get_rat_mode_any(struct ofono_radio_settings *rs, unsigned int mode,
+			ofono_radio_settings_rat_mode_set_cb_t cb,
+			void *user_data)
+{
+	struct settings_data *rsd = ofono_radio_settings_get_data(rs);
+	struct rat_mode_any_data *data = l_new(struct rat_mode_any_data, 1);
+	struct cb_data *cbd = cb_data_init(&data->cbd, cb, user_data);
+
+	if (!rsd->dms)
+		goto error;
+
+	cbd->user = rs;
+	data->mode = mode;
+
+	if (qmi_service_send(rsd->dms, QMI_DMS_GET_CAPS, NULL,
+					get_rat_mode_any_cb, data, l_free) > 0)
+		return true;
+
+error:
+	l_free(data);
+	rsd->rat_mode_any = QMI_NAS_RAT_MODE_PREF_ANY;
+	return false;
+}
+
+static void qmi_set_rat_mode(struct ofono_radio_settings *rs, unsigned int mode,
+			ofono_radio_settings_rat_mode_set_cb_t cb,
+			void *user_data)
+{
+	struct settings_data *rsd = ofono_radio_settings_get_data(rs);
+
+	if (rsd->rat_mode_any || !get_rat_mode_any(rs, mode, cb, user_data))
+		_set_rat_mode(rs, mode, cb, user_data);
+}
+
+static void get_caps_cb(struct qmi_result *result, void *user_data)
+{
+	struct cb_data *cbd = user_data;
+	struct ofono_radio_settings *rs = cbd->user;
+	struct settings_data *rsd = ofono_radio_settings_get_data(rs);
+	ofono_radio_settings_available_rats_query_cb_t cb = cbd->cb;
+	const struct qmi_dms_device_caps *caps;
+	uint16_t len;
+	uint8_t i;
+	unsigned int available_rats;
+
+	DBG("");
+
+	if (qmi_result_set_error(result, NULL))
+		goto error;
+
+	caps = qmi_result_get(result, QMI_DMS_RESULT_DEVICE_CAPS, &len);
+	if (!caps)
+		goto error;
+
 	available_rats = 0;
+
 	for (i = 0; i < caps->radio_if_count; i++) {
 		switch (caps->radio_if[i]) {
 		case QMI_DMS_RADIO_IF_GSM:
 			available_rats |= OFONO_RADIO_ACCESS_MODE_GSM;
+			rsd->rat_mode_any |= QMI_NAS_RAT_MODE_PREF_GSM;
 			break;
 		case QMI_DMS_RADIO_IF_UMTS:
 			available_rats |= OFONO_RADIO_ACCESS_MODE_UMTS;
+			rsd->rat_mode_any |= QMI_NAS_RAT_MODE_PREF_UMTS;
 			break;
 		case QMI_DMS_RADIO_IF_LTE:
 			available_rats |= OFONO_RADIO_ACCESS_MODE_LTE;
+			rsd->rat_mode_any |= QMI_NAS_RAT_MODE_PREF_LTE;
 			break;
 		}
 	}
@@ -186,6 +273,8 @@ static void qmi_query_available_rats(struct ofono_radio_settings *rs,
 
 	if (!rsd->dms)
 		goto error;
+
+	cbd->user = rs;
 
 	if (qmi_service_send(rsd->dms, QMI_DMS_GET_CAPS, NULL,
 					get_caps_cb, cbd, l_free) > 0)
