@@ -21,6 +21,16 @@ struct call_forwarding_data {
 	struct qmi_service *voice;
 };
 
+struct call_forwarding_info {
+	struct {
+		int8_t active;
+		uint8_t cls;
+		uint8_t len;
+		uint8_t number[];
+	} i;
+	uint8_t time;
+} __attribute__((__packed__));
+
 struct call_forwarding_info_ext {
 	uint8_t active;
 	uint8_t cls;
@@ -31,7 +41,7 @@ struct call_forwarding_info_ext {
 	uint8_t plan;
 	uint8_t len;
 	uint8_t number[];
-};
+} __attribute__((__packed__));
 
 static int forw_type_to_reason(int type)
 {
@@ -78,55 +88,68 @@ static void query_cb(struct qmi_result *result, void *user_data)
 	ofono_call_forwarding_query_cb_t cb = cbd->cb;
 	const uint8_t *p;
 	uint8_t num;
+	const uint8_t *end;
 	uint16_t length;
-
+	struct ofono_call_forwarding_condition *list = NULL;
+	int i;
+	bool extended = false;
 	DBG("");
 
 	if (qmi_result_set_error(result, NULL))
 		goto error;
 
 	/*
-	 * we want extended info, because of the number type.
-	 * FIXME - shall we fallback to 0x10 if there is no extended info?
+	 * we want extended info if any, because of the number type.
 	 */
 	p = qmi_result_get(result, 0x16, &length);
-	if (p && length) {
-		struct ofono_call_forwarding_condition *list;
-		const uint8_t *end = p + length;
-		int i;
+	if (p && length)
+		extended = true;
+	else
+		p = qmi_result_get(result, 0x10, &length);
 
-		num = *p++;
+	if (!extended && (!p || !length))
+		goto error;
 
-		list = l_new(struct ofono_call_forwarding_condition, num);
+	end = p + length;
+	num = *p++;
+	list = l_new(struct ofono_call_forwarding_condition, num);
 
-		for (i = 0; i < num; i++) {
-			struct call_forwarding_info_ext *info = (void *)p;
+	for (i = 0; i < num; i++) {
+		if (extended) {
+			struct call_forwarding_info_ext *fi = (void *)p;
+			const uint8_t *iend = p + sizeof(*fi);
 			int type;
 
-			/* do not try to access beyond buffer end */
-			if (p + sizeof(*info) > end ||
-					p + sizeof(*info) + info->len > end) {
-				l_free(list);
+			if (iend > end || iend + fi->len > end)
 				goto error;
-			}
 
-			if (info->type == 1)
-				type = OFONO_NUMBER_TYPE_INTERNATIONAL;
-			else
-				type = OFONO_NUMBER_TYPE_UNKNOWN;
+			type = fi->type == 1 ?
+					OFONO_NUMBER_TYPE_INTERNATIONAL :
+					OFONO_NUMBER_TYPE_UNKNOWN;
+			set_fwd_cond(&list[i], fi->active, fi->cls,
+					fi->time, type, fi->number, fi->len);
 
-			set_fwd_cond(&list[i], info->active, info->cls,
-					info->time, type, info->number,
-					info->len);
-			p += sizeof(*info) + info->len;
+			p += sizeof(*fi) + fi->len;
+		} else {
+			struct call_forwarding_info *fi = (void *)p;
+			const uint8_t *iend = p + sizeof(*fi);
+
+			if (iend > end || iend + fi->i.len > end)
+				goto error;
+
+			set_fwd_cond(&list[i], fi->i.active, fi->i.cls,
+					fi->time, OFONO_NUMBER_TYPE_UNKNOWN,
+					fi->i.number, fi->i.len);
+			p += sizeof(*fi) + fi->i.len;
 		}
-
-		CALLBACK_WITH_SUCCESS(cb, num, list, cbd->data);
-		l_free(list);
-		return;
 	}
 
+	CALLBACK_WITH_SUCCESS(cb, num, list, cbd->data);
+	l_free(list);
+	return;
+
 error:
+	l_free(list);
 	CALLBACK_WITH_FAILURE(cb, 0, NULL, cbd->data);
 }
 
