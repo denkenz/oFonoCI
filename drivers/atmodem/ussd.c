@@ -121,6 +121,11 @@ static void cusd_parse(GAtResult *result, struct ofono_ussd *ussd)
 
 	DBG("response charset %d modem charset %d", charset, data->charset);
 
+	if (strlen(content) > sizeof(msg) * 2)
+		status = 4; /* Not supported */
+		goto out;
+	}
+
 	switch (charset) {
 	case SMS_CHARSET_7BIT:
 		switch (data->charset) {
