@@ -813,7 +813,7 @@ static DBusMessage *am_agent_unregister(DBusConnection *conn,
 
 static const GDBusMethodTable am_methods[] = {
 	{ GDBUS_METHOD("GetCards",
-			NULL, GDBUS_ARGS({"cards", "a{oa{sv}}"}),
+			NULL, GDBUS_ARGS({"cards", "a(oa{sv})"}),
 			am_get_cards) } ,
 	{ GDBUS_METHOD("Register",
 			GDBUS_ARGS({"path", "o"}, {"codecs", "ay"}), NULL,
