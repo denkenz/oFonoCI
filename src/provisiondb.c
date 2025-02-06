@@ -224,8 +224,21 @@ static bool tags_match(char **tags_filter, const char *tags)
 	_auto_(l_strv_free) char **split_tags = 0;
 	unsigned int i;
 
-	if (!tags_filter || !tags)
+	/*
+	 * If tags_filter was not specified, then the caller does not want
+	 * to match on tags, so just return true.
+	 */
+	if (!tags_filter)
 		return true;
+
+	/*
+	 * If tags_filter was specified, then the caller does want to
+	 * match on tags. Consequently, if there are no tags to match
+	 * against, then we must return false since such an entry cannot
+	 * match.
+	 */
+	if (tags_filter && !tags)
+		return false;
 
 	split_tags = l_strsplit(tags, ',');
 
