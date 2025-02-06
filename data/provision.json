@@ -14191,6 +14191,15 @@
           "ia"
         ],
         "tags": "m2m"
+      },
+      {
+        "name": "AT&T MVNO IoT/M2M (Public)",
+        "apn": "broadband",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-m2m-public"
       }
     ]
   },
