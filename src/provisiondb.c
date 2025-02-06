@@ -204,7 +204,7 @@ static struct provision_data *__get_provision_data(struct node *node)
 	return ((void *) node) + sizeof(struct node);
 }
 
-static int __get_string(struct provision_db *pdb, uint64_t offset,
+static int __get_string(struct provision_db const *pdb, uint64_t offset,
 				const char **out_str)
 {
 	if (!offset) {
