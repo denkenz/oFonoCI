@@ -14336,6 +14336,14 @@
         "type": [
           "wap"
         ]
+      },
+      {
+        "name": "4G LTE Contract (Private)",
+        "apn": "wyleslte.gw7.vzwentp",
+        "type": [
+          "internet"
+        ],
+        "tags": "kore-m2m-private"
       }
     ]
   },
