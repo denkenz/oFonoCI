@@ -14191,6 +14191,24 @@
           "ia"
         ],
         "tags": "m2m"
+      },
+      {
+        "name": "AT&T MVNO IoT/M2M (Public)",
+        "apn": "broadband",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-m2m-public"
+      },
+      {
+        "name": "AT&T MVNO IoT/M2M (Private)",
+        "apn": "10569.mcs",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-m2m-private"
       }
     ]
   },
@@ -14232,6 +14250,24 @@
           "ia"
         ],
         "tags": "iot"
+      },
+      {
+        "name": "T-Mobile LTE MVNO IoT/M2M (Public)",
+        "apn": "iot.tmowholesale",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-m2m-public"
+      },
+      {
+        "name": "T-Mobile LTE KORE Wireless MVNO IoT/M2M (Private)",
+        "apn": "c1.korem2m.com",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-m2m-private"
       }
     ]
   },
@@ -14285,14 +14321,16 @@
         "type": [
           "ims",
           "ia"
-        ]
+        ],
+        "tags": "kore-m2m-public,kore-m2m-private"
       },
       {
-        "name": "4G LTE Contract",
+        "name": "4G LTE Contract (Public)",
         "apn": "vzwinternet",
         "type": [
           "internet"
-        ]
+        ],
+        "tags": "kore-m2m-public"
       },
       {
         "name": "4G LTE Contract",
@@ -14300,6 +14338,14 @@
         "type": [
           "wap"
         ]
+      },
+      {
+        "name": "4G LTE Contract (Private)",
+        "apn": "wyleslte.gw7.vzwentp",
+        "type": [
+          "internet"
+        ],
+        "tags": "kore-m2m-private"
       }
     ]
   },
