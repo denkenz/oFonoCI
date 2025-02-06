@@ -14200,6 +14200,15 @@
           "ia"
         ],
         "tags": "kore-m2m-public"
+      },
+      {
+        "name": "AT&T MVNO IoT/M2M (Private)",
+        "apn": "10569.mcs",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-m2m-private"
       }
     ]
   },
