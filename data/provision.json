@@ -14259,6 +14259,15 @@
           "ia"
         ],
         "tags": "kore-m2m-public"
+      },
+      {
+        "name": "T-Mobile LTE KORE Wireless MVNO IoT/M2M (Private)",
+        "apn": "c1.korem2m.com",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-m2m-private"
       }
     ]
   },
