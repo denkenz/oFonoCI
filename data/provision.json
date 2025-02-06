@@ -14324,11 +14324,12 @@
         ]
       },
       {
-        "name": "4G LTE Contract",
+        "name": "4G LTE Contract (Public)",
         "apn": "vzwinternet",
         "type": [
           "internet"
-        ]
+        ],
+        "tags": "kore-m2m-public"
       },
       {
         "name": "4G LTE Contract",
