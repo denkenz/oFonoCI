@@ -219,6 +219,26 @@ static int __get_string(struct provision_db const *pdb, uint64_t offset,
 	return 0;
 }
 
+/**
+ *  @brief
+ *    Return whether one of the tags in the specified tags array
+ *    matches one of the tags in the specified comma-separated tags
+ *    list.
+ *
+ *  @param[in]  tags_filter  An optional pointer to a string array of
+ *                           tags to match.
+ *  @param[in]  tags         An optional pointer to an immutable C
+ *                           string containing a comma-separated
+ *                           list of tags for @a tags_filter to
+ *                           match against.
+ *
+ *  @returns
+ *    True if @a tags_filter is non-null and one of its tags matches a
+ *    tag in @a tags; otherwise, false.
+ *
+ *  @private
+ *
+ */
 static bool tags_match(char **tags_filter, const char *tags)
 {
 	_auto_(l_strv_free) char **split_tags = 0;
