@@ -832,10 +832,12 @@ endif
 EXTRA_DIST = src/genbuiltin plugins/ofono.rules plugins/ofono-speedup.rules \
 		tools/provisiontool \
 		data/provision.json unit/test-provision.json \
+		doc/ofono.conf.5.in \
 		$(doc_files) $(test_scripts)
 
-dist_man_MANS = doc/ofonod.8
+MANUAL_PAGES = doc/ofono.conf.5 doc/ofonod.8
 
+dist_man_MANS = $(MANUAL_PAGES)
 
 unit_objects =
 
@@ -1037,6 +1039,13 @@ src/builtin.h: src/genbuiltin config.status
 
 plugins/%.rules:
 	$(AM_V_GEN)cp $(srcdir)/$(subst 97-,,$@) $@
+
+do_subst = $(AM_V_GEN)$(SED) \
+		-e 's,[@]sysconfdir[@],$(sysconfdir),g'
+
+%.5 : %.5.in
+	$(AM_V_at)$(MKDIR_P) $(dir $@)
+	$(do_subst) < $< > $@
 
 include/ofono/version.h: include/version.h
 	$(AM_V_at)$(MKDIR_P) include/ofono
