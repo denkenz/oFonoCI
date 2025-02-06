@@ -14321,7 +14321,8 @@
         "type": [
           "ims",
           "ia"
-        ]
+        ],
+        "tags": "kore-m2m-public,kore-m2m-private"
       },
       {
         "name": "4G LTE Contract (Public)",
