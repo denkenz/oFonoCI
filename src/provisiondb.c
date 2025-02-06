@@ -269,6 +269,31 @@ static bool tags_match(char **tags_filter, const char *tags)
 	return false;
 }
 
+/**
+ *  @brief
+ *    Get contexts from the provisioning database at the specified
+ *    offset, potentially matching the optionally-specified tags.
+ *
+ *  @param[in]   pdb          A pointer to the immutable
+ *                            provisioning database from which to
+ *                            return contexts.
+ *  @param[in]   offset       The offset in @a pdb from which to
+ *                            return contexts.
+ *  @param[in]   tags_filter  An optional pointer to a string array
+ *                            of tags to match against candidate
+ *                            contexts.
+ *  @param[out]  contexts     A pointer to mutable storage for a
+ *                            an array of retrieved contexts.
+ *  @param[out]  n_contexts   A pointer to mutable storage for the
+ *                            number of contexts pointed to by @a
+ *                            contexts.
+ *
+ *  @retval  0        If successful.
+ *  @retval  -EPROTO  If @a offset results in an overrun of @a pdb.
+ *
+ *  @private
+ *
+ */
 static int __get_contexts(struct provision_db const *pdb, uint64_t offset,
 				char **tags_filter,
 				struct provision_db_entry **contexts,
