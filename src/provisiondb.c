@@ -236,7 +236,7 @@ static bool tags_match(char **tags_filter, const char *tags)
 	return false;
 }
 
-static int __get_contexts(struct provision_db *pdb, uint64_t offset,
+static int __get_contexts(struct provision_db const *pdb, uint64_t offset,
 				char **tags_filter,
 				struct provision_db_entry **contexts,
 				size_t *n_contexts)
