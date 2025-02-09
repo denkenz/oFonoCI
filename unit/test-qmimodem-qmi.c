@@ -576,7 +576,7 @@ static void test_dedicated(const void *data)
 	qmi_service_free(service);
 }
 
-static void exit_if_qrtr_not_supported(void)
+static bool is_qrtr_supported(void)
 {
 	int fd;
 
@@ -585,31 +585,36 @@ static void exit_if_qrtr_not_supported(void)
 		printf("Could not create AF_QIPCRTR socket: %s\n",
 					strerror(errno));
 		printf("Skipping tests...\n");
-		exit(0);
+		return false;
 	}
 
 	close(fd);
+	return true;
 }
 
 int main(int argc, char **argv)
 {
 	int result;
 
-	exit_if_qrtr_not_supported();
-
 	/* Enable all DBG logging */
 	__ofono_log_init(argv[0], "*", FALSE);
 
 	l_test_init(&argc, &argv);
 	l_test_set_uses_own_main();
-	l_test_add("QRTR node creation", test_create_qrtr_node, NULL);
-	l_test_add("QRTR lookup", test_lookup, NULL);
-	l_test_add("QRTR services may be created", test_create_services, NULL);
-	l_test_add("QRTR service sends/responses", test_send_data, NULL);
-	l_test_add("QRTR notifications", test_notifications, NULL);
-	l_test_add("QRTR service notifications are independent",
+
+	if (is_qrtr_supported()) {
+		l_test_add("QRTR node creation", test_create_qrtr_node, NULL);
+		l_test_add("QRTR lookup", test_lookup, NULL);
+		l_test_add("QRTR services may be created",
+					test_create_services, NULL);
+		l_test_add("QRTR service sends/responses",
+					test_send_data, NULL);
+		l_test_add("QRTR notifications", test_notifications, NULL);
+		l_test_add("QRTR service notifications are independent",
 				test_service_notification_independence, NULL);
-	l_test_add("QRTR dedicated service", test_dedicated, NULL);
+		l_test_add("QRTR dedicated service", test_dedicated, NULL);
+	}
+
 	result = l_test_run();
 
 	__ofono_log_cleanup();
