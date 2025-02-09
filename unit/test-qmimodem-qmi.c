@@ -601,6 +601,7 @@ int main(int argc, char **argv)
 	__ofono_log_init(argv[0], "*", FALSE);
 
 	l_test_init(&argc, &argv);
+	l_test_set_uses_own_main();
 	l_test_add("QRTR node creation", test_create_qrtr_node, NULL);
 	l_test_add("QRTR lookup", test_lookup, NULL);
 	l_test_add("QRTR services may be created", test_create_services, NULL);
