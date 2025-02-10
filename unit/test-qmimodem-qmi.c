@@ -600,7 +600,6 @@ int main(int argc, char **argv)
 	__ofono_log_init(argv[0], "*", FALSE);
 
 	l_test_init(&argc, &argv);
-	l_test_set_uses_own_main();
 
 	if (is_qrtr_supported()) {
 		l_test_add("QRTR node creation", test_create_qrtr_node, NULL);
