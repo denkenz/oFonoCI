@@ -204,7 +204,7 @@ static struct provision_data *__get_provision_data(struct node *node)
 	return ((void *) node) + sizeof(struct node);
 }
 
-static int __get_string(struct provision_db *pdb, uint64_t offset,
+static int __get_string(struct provision_db const *pdb, uint64_t offset,
 				const char **out_str)
 {
 	if (!offset) {
@@ -219,13 +219,46 @@ static int __get_string(struct provision_db *pdb, uint64_t offset,
 	return 0;
 }
 
+/**
+ *  @brief
+ *    Return whether one of the tags in the specified tags array
+ *    matches one of the tags in the specified comma-separated tags
+ *    list.
+ *
+ *  @param[in]  tags_filter  An optional pointer to a string array of
+ *                           tags to match.
+ *  @param[in]  tags         An optional pointer to an immutable C
+ *                           string containing a comma-separated
+ *                           list of tags for @a tags_filter to
+ *                           match against.
+ *
+ *  @returns
+ *    True if @a tags_filter is non-null and one of its tags matches a
+ *    tag in @a tags; otherwise, false.
+ *
+ *  @private
+ *
+ */
 static bool tags_match(char **tags_filter, const char *tags)
 {
 	_auto_(l_strv_free) char **split_tags = 0;
 	unsigned int i;
 
-	if (!tags_filter || !tags)
+	/*
+	 * If tags_filter was not specified, then the caller does not want
+	 * to match on tags, so just return true.
+	 */
+	if (!tags_filter)
 		return true;
+
+	/*
+	 * If tags_filter was specified, then the caller does want to
+	 * match on tags. Consequently, if there are no tags to match
+	 * against, then we must return false since such an entry cannot
+	 * match.
+	 */
+	if (tags_filter && !tags)
+		return false;
 
 	split_tags = l_strsplit(tags, ',');
 
@@ -236,7 +269,32 @@ static bool tags_match(char **tags_filter, const char *tags)
 	return false;
 }
 
-static int __get_contexts(struct provision_db *pdb, uint64_t offset,
+/**
+ *  @brief
+ *    Get contexts from the provisioning database at the specified
+ *    offset, potentially matching the optionally-specified tags.
+ *
+ *  @param[in]   pdb          A pointer to the immutable
+ *                            provisioning database from which to
+ *                            return contexts.
+ *  @param[in]   offset       The offset in @a pdb from which to
+ *                            return contexts.
+ *  @param[in]   tags_filter  An optional pointer to a string array
+ *                            of tags to match against candidate
+ *                            contexts.
+ *  @param[out]  contexts     A pointer to mutable storage for a
+ *                            an array of retrieved contexts.
+ *  @param[out]  n_contexts   A pointer to mutable storage for the
+ *                            number of contexts pointed to by @a
+ *                            contexts.
+ *
+ *  @retval  0        If successful.
+ *  @retval  -EPROTO  If @a offset results in an overrun of @a pdb.
+ *
+ *  @private
+ *
+ */
+static int __get_contexts(struct provision_db const *pdb, uint64_t offset,
 				char **tags_filter,
 				struct provision_db_entry **contexts,
 				size_t *n_contexts)
