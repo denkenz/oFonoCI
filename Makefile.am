@@ -958,6 +958,9 @@ unit_test_provision_DEPENDENCIES = $(ell_dependencies) \
 					unit/test-provision.db
 unit_objects += $(unit_test_provision_OBJECTS)
 
+LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) \
+			$(top_srcdir)/build-aux/tap-driver.sh
+
 TESTS = $(unit_tests)
 
 if TOOLS
