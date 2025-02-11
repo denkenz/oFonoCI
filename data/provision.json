@@ -14291,7 +14291,8 @@
         "name": "4G LTE Contract",
         "apn": "vzwinternet",
         "type": [
-          "internet"
+          "internet",
+          "ia"
         ]
       },
       {
