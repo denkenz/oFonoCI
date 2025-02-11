@@ -14285,7 +14285,8 @@
         "type": [
           "ims",
           "ia"
-        ]
+        ],
+        "tags": "volte"
       },
       {
         "name": "4G LTE Contract",
@@ -14293,14 +14294,16 @@
         "type": [
           "internet",
           "ia"
-        ]
+        ],
+        "tags": "iot,m2m,volte"
       },
       {
         "name": "4G LTE Contract",
         "apn": "vzwapp",
         "type": [
           "wap"
-        ]
+        ],
+        "tags": "volte"
       }
     ]
   },
