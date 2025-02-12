@@ -98,6 +98,12 @@ struct qmi_transport {
 	 *  for back-to-back QMI service requests.
 	 */
 	unsigned int min_req_period_us;
+
+	/**
+	 *  The time, in microseconds, when the last QMI service request
+	 *  was sent.
+	 */
+	uint64_t last_req_sent_time_us;
 };
 
 struct qmi_qmux_device {
