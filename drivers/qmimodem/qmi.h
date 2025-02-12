@@ -43,6 +43,8 @@
 #define QMI_SERVICE_RMS		225	/* Remote management service */
 #define QMI_SERVICE_OMA		226	/* OMA device management service */
 
+#define QMI_PROP_MIN_REQ_PERIOD_US "QMIMinReqPeriodUs"
+
 enum qmi_data_endpoint_type {
 	QMI_DATA_ENDPOINT_TYPE_UNKNOWN   = 0x00,
 	QMI_DATA_ENDPOINT_TYPE_HSIC      = 0x01,
