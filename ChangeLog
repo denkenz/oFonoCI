@@ -1,3 +1,8 @@
+ver 2.15:
+	Fix issue with SMS and uninitialized buffers.
+	Fix issue with USSD and uninitialized buffers.
+	Add support for the Test Anything Protocol.
+
 ver 2.14:
 	Fix issue with STK and buffer length checks.
 	Fix issue with SMS and buffer length checks.
