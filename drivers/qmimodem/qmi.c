@@ -665,7 +665,22 @@ static bool can_write_data(struct l_io *io, void *user_data)
 {
 	struct qmi_transport *transport = user_data;
 	struct qmi_request *req;
+	const uint64_t now = l_time_now();
+	uint64_t delta = 0;
 	int r;
+
+	/*
+	 * Determine if we need to rate-limit commands to a
+	 * transport-specific minimum request period. If so,
+	 * return true so that the queue can be retried again
+	 * later.
+	 */
+	if (transport->last_req_sent_time_us != 0) {
+		delta = l_time_diff(now, transport->last_req_sent_time_us);
+
+		if (delta < transport->min_req_period_us)
+			return true;
+	}
 
 	req = l_queue_pop_head(transport->req_queue);
 	if (!req)
@@ -676,6 +691,8 @@ static bool can_write_data(struct l_io *io, void *user_data)
 		__request_free(req);
 		return false;
 	}
+
+	transport->last_req_sent_time_us = now;
 
 	if (l_queue_length(transport->req_queue) > 0)
 		return true;
