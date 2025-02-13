@@ -14185,6 +14185,15 @@
         "tags": "5g"
       },
       {
+        "name": "AT&T MVNO IoT/M2M (Public)",
+        "apn": "broadband",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-public"
+      },
+      {
         "name": "AT&T M2M",
         "apn": "m2m005246.attz",
         "type": [
