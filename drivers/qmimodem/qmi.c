@@ -92,6 +92,18 @@ struct qmi_transport {
 	const struct qmi_transport_ops *ops;
 	struct debug_data debug;
 	bool writer_active : 1;
+
+	/**
+	 *  If specified via qmi_qmux_device_options, the minimum period
+	 *  for back-to-back QMI service requests.
+	 */
+	unsigned int min_req_period_us;
+
+	/**
+	 *  The time, in microseconds, when the last QMI service request
+	 *  was sent.
+	 */
+	uint64_t last_req_sent_time_us;
 };
 
 struct qmi_qmux_device {
@@ -653,7 +665,24 @@ static bool can_write_data(struct l_io *io, void *user_data)
 {
 	struct qmi_transport *transport = user_data;
 	struct qmi_request *req;
+	const bool throttle_enabled = transport->min_req_period_us > 0;
+	uint64_t now = 0;
+	uint64_t delta;
 	int r;
+
+	/*
+	 * Determine if we need to rate-limit commands to a
+	 * transport-specific minimum request period. If so,
+	 * return true so that the queue can be retried again
+	 * later.
+	 */
+	if (throttle_enabled && transport->last_req_sent_time_us != 0) {
+		now = l_time_now();
+		delta = l_time_diff(now, transport->last_req_sent_time_us);
+
+		if (delta < transport->min_req_period_us)
+			return true;
+	}
 
 	req = l_queue_pop_head(transport->req_queue);
 	if (!req)
@@ -664,6 +693,9 @@ static bool can_write_data(struct l_io *io, void *user_data)
 		__request_free(req);
 		return false;
 	}
+
+	if (throttle_enabled)
+		transport->last_req_sent_time_us = now;
 
 	if (l_queue_length(transport->req_queue) > 0)
 		return true;
