@@ -14242,6 +14242,15 @@
           "ia"
         ],
         "tags": "iot"
+      },
+      {
+        "name": "T-Mobile LTE KORE Wireless MVNO IoT/M2M (Public)",
+        "apn": "iot.tmowholesale",
+        "type": [
+          "internet",
+          "ia"
+        ],
+        "tags": "kore-public"
       }
     ]
   },
