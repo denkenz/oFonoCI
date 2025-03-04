@@ -166,7 +166,6 @@ add telephony capabilities to Linux desktop and mobile devices.
 
 6.0 Resources
 
-Website: http://ofono.org
+Website: https://git.kernel.org/pub/scm/network/ofono/ofono.git/about/
 Mailing List: ofono@lists.linux.dev
-IRC: #ofono on freenode
 
