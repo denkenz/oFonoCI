@@ -442,6 +442,8 @@ static void get_msg_list_cb(struct qmi_result *result, void *user_data)
 	const struct qmi_wms_result_msg_list *list;
 	uint32_t cnt = 0;
 	uint16_t tmp;
+	uint16_t length;
+	size_t msg_size;
 
 	DBG("");
 
@@ -451,7 +453,7 @@ static void get_msg_list_cb(struct qmi_result *result, void *user_data)
 		goto done;
 	}
 
-	list = qmi_result_get(result, QMI_WMS_RESULT_MSG_LIST, NULL);
+	list = qmi_result_get(result, QMI_WMS_RESULT_MSG_LIST, &length);
 	if (list == NULL) {
 		DBG("Err: get msg list empty");
 		goto done;
@@ -459,6 +461,13 @@ static void get_msg_list_cb(struct qmi_result *result, void *user_data)
 
 	cnt = L_LE32_TO_CPU(list->cnt);
 	DBG("msgs found %d", cnt);
+
+	msg_size = cnt * sizeof(list->msg[0]);
+
+	if (length != sizeof(list->cnt) + msg_size) {
+		DBG("Err: invalid msg list count");
+		goto done;
+	}
 
 	for (tmp = 0; tmp < cnt; tmp++) {
 		DBG("unread type %d ndx %d", list->msg[tmp].type,
@@ -473,8 +482,6 @@ static void get_msg_list_cb(struct qmi_result *result, void *user_data)
 
 	/* save list and get 1st msg */
 	if (cnt) {
-		int msg_size = cnt * sizeof(list->msg[0]);
-
 		data->msg_list = l_malloc(sizeof(list->cnt) + msg_size);
 		data->msg_list->cnt = cnt;
 		memcpy(data->msg_list->msg, list->msg, msg_size);
