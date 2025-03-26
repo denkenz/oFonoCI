@@ -1,3 +1,6 @@
+ver 2.16:
+	Add support for QMI service request rate limiting.
+
 ver 2.15:
 	Fix issue with SMS and uninitialized buffers.
 	Fix issue with USSD and uninitialized buffers.
