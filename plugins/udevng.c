@@ -1196,6 +1196,59 @@ static gboolean setup_mbim(struct modem_info *modem)
 		else if (g_strcmp0(subsystem, "tty") == 0) {
 			if (g_strcmp0(info->number, "02") == 0)
 				atcmd = info->devnode;
+		} else if (g_strcmp0(subsystem, "pci") == 0) {
+			char path[512];
+			sprintf(path, "%s/wwan", udev_device_get_syspath(info->udev_device));
+
+			DIR *d = opendir(path);
+			struct dirent *dir;
+			if (d) {
+				struct udev *new_udev = udev_new();
+				udev_ref(new_udev);
+
+				while ((dir = readdir(d))) {
+					if (g_strcmp0(dir->d_name, ".") == 0 ||
+						g_strcmp0(dir->d_name, "..") == 0)
+						continue;
+
+					char wwan_path[1024];
+					sprintf(wwan_path, "%s/%s", path, dir->d_name);
+
+					struct udev_device *wwan_device = udev_device_new_from_syspath(new_udev, wwan_path);
+					net = udev_device_get_sysname(wwan_device);
+
+					// Parse all the subdirectories now
+					DIR *sd = opendir(wwan_path);
+					struct dirent *subdir;
+					while ((subdir = readdir(sd))) {
+						if (subdir->d_type != DT_DIR)
+							continue;
+
+						if (g_strcmp0(subdir->d_name, ".") == 0 ||
+							g_strcmp0(subdir->d_name, "..") == 0)
+							continue;
+
+						char sub_path[2048];
+						sprintf(sub_path, "%s/%s", wwan_path, subdir->d_name);
+
+						struct udev_device *sub_device = udev_device_new_from_syspath(new_udev, sub_path);
+						const char *sub_subsystem = udev_device_get_subsystem(sub_device);
+
+						if (g_strcmp0(sub_subsystem, "wwan") == 0) {
+							const char *type = udev_device_get_sysattr_value(sub_device, "type");
+
+							if (g_strcmp0(type, "MBIM") == 0)
+								ctl = udev_device_get_devnode(sub_device);
+							else if (g_strcmp0(type, "AT") == 0)
+								atcmd = udev_device_get_devnode(sub_device);
+						}
+					}
+					closedir(sd);
+					break;
+				}
+				closedir(d);
+				udev_unref(new_udev);
+			}
 		}
 	}
 
