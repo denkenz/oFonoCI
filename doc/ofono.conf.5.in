@@ -1,0 +1,37 @@
+.\" ofono.conf(5) manual page
+.\"
+.\" Copyright (C) 2025 The oFono Authors
+.\"
+.TH "ofono.conf" "5" "2025-02-05" ""
+.SH NAME
+main.conf \- oFono configuration file
+.SH SYNOPSIS
+.B @sysconfdir@/ofono/main.conf
+.SH DESCRIPTION
+.P
+.B main.conf
+is a configuration file for oFono. The configuration file is
+optional but it can be used to set up various aspects of oFono's
+behavior. The location of the file may be changed through use of
+the \fB\-\-config= \fRargument for \fBofonod\fP(8).
+.SH "FILE FORMAT"
+.P
+The configuration file consists of sections (groups) of key-value pairs.
+Lines beginning with a '#' and blank lines are considered comments.
+Sections are started by a header line containing the section enclosed
+in '[' and ']', and ended implicitly by the start of the next section
+or the end of the file. Each key-value pair must be contained in a section.
+.P
+Description of sections and available keys follows:
+.SS [Provision]
+This section is an optional section of the configuration file that
+influences the behavior of Cellular network provisioning.
+.TP
+.BI TagsFilter= tag\fR[,...]
+One or more tag strings to help filter and downselect the desired
+Cellular access point name(s) (APN(s)) when provisioning and/or
+attaching to the network when multiple such APNs exist for a given
+Cellular home network identity (HNI) (that is, mobile country code
+(MCC) + mobile network code (MNC) pair).
+.SH "SEE ALSO"
+.BR ofonod (8)
