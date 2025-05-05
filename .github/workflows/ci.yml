@@ -171,7 +171,7 @@ jobs:
       run: |
         if [ "${{ matrix.container['image'] }}" == "fedora:latest" ]; then
             echo "Setting up environment for Fedora"
-            yum -y install valgrind autoconf automake libtool make glib2-devel dbus-libs dbus-daemon dbus-devel libudev-devel zstd mobile-broadband-provider-info-devel openssl xz iproute
+            yum -y install valgrind autoconf automake libtool make awk glib2-devel dbus-libs dbus-daemon dbus-devel libudev-devel zstd mobile-broadband-provider-info-devel openssl xz iproute
             yum -y install ${{ matrix.container['compiler'] }}
         elif [ "${{ matrix.container['image'] }}" == "alpine:latest" ]; then
           echo "Setting up environment for Alpine"
