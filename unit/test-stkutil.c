@@ -39,7 +39,7 @@ struct sms_submit_test {
 	guint8 dcs;
 	struct sms_validity_period vp;
 	guint8 udl;
-	guint8 ud[160];
+	guint8 ud[161];
 };
 
 struct sms_test {
