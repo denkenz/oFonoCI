@@ -80,22 +80,19 @@ static int mbim_probe(struct ofono_modem *modem)
 {
 	const char *descriptors;
 	struct mbim_data *data;
-	int err;
 
 	DBG("%p", modem);
 
-	descriptors = ofono_modem_get_string(modem, "DescriptorFile");
-
-	if (!descriptors)
-		return -EINVAL;
-
 	data = l_new(struct mbim_data, 1);
 	data->max_outstanding = 1;
+	data->max_segment = 512;
 
-	err = mbim_parse_descriptors(data, descriptors);
-	if (err < 0) {
-		DBG("Warning, unable to load descriptors, setting defaults");
-		data->max_segment = 512;
+	descriptors = ofono_modem_get_string(modem, "DescriptorFile");
+	if (descriptors) {
+		int err = mbim_parse_descriptors(data, descriptors);
+
+		if (err < 0)
+			ofono_warn("Unable to load descriptors");
 	}
 
 	DBG("MaxSegment: %d, MaxOutstanding: %d",
@@ -272,7 +269,7 @@ static int mbim_enable(struct ofono_modem *modem)
 	if (!device)
 		return -EINVAL;
 
-	DBG("%p", device);
+	DBG("%s", device);
 	fd = open(device, O_EXCL | O_NONBLOCK | O_RDWR);
 	if (fd < 0)
 		return -EIO;
