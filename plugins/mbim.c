@@ -269,7 +269,7 @@ static int mbim_enable(struct ofono_modem *modem)
 	if (!device)
 		return -EINVAL;
 
-	DBG("%p", device);
+	DBG("%s", device);
 	fd = open(device, O_EXCL | O_NONBLOCK | O_RDWR);
 	if (fd < 0)
 		return -EIO;
