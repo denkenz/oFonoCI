@@ -1653,6 +1653,7 @@ static gboolean setup_mhi(struct modem_info *modem)
 {
 	const struct device_info *net = NULL;
 	const struct device_info *qrtr = NULL;
+	const struct device_info *mbim = NULL;
 	GSList *list;
 	int r;
 
@@ -1660,29 +1661,53 @@ static gboolean setup_mhi(struct modem_info *modem)
 
 	for (list = modem->devices; list; list = list->next) {
 		const struct device_info *info = list->data;
-		const char *subsystem =
-				udev_device_get_subsystem(info->udev_device);
+		struct udev_device *udev_device = info->udev_device;
+		const char *subsystem = udev_device_get_subsystem(udev_device);
+		const char *devtype = udev_device_get_devtype(udev_device);
 
-		DBG("%s", udev_device_get_syspath(info->udev_device));
+		DBG("%s %s %s", udev_device_get_syspath(udev_device),
+				subsystem, devtype);
 
-		if (l_streq0(udev_device_get_property_value(info->udev_device,
+		if (l_streq0(udev_device_get_property_value(udev_device,
 								"MODALIAS"),
 					"mhi:IPCR"))
 			qrtr = info;
 		else if (l_streq0(subsystem, "net"))
 			net = info;
+		else if (l_streq0(subsystem, "wwan") &&
+				l_streq0(devtype, "wwan_port")) {
+			const char *type =
+				udev_device_get_sysattr_value(udev_device,
+									"type");
+
+			if (l_streq0(type, "MBIM"))
+				mbim = info;
+		}
 	}
 
-	DBG("net: %p, qrtr: %p", net, qrtr);
-
-	if (!net || !qrtr)
+	DBG("net: %p", net);
+	if (!net)
 		return FALSE;
 
-	r = setup_qmi_qrtr(modem, net);
-	if (r < 0)
-		return FALSE;
+	/* Prefer to drive MHI devices in QRTR mode if available */
+	if (qrtr) {
+		r = setup_qmi_qrtr(modem, net);
+		if (r < 0)
+			return FALSE;
 
-	return TRUE;
+		return TRUE;
+	}
+
+	/* Otherwise, try MBIM mode */
+	if (mbim) {
+		ofono_modem_set_string(modem->modem, "Device", mbim->devnode);
+		ofono_modem_set_string(modem->modem,
+					"NetworkInterface", get_ifname(net));
+		ofono_modem_set_driver(modem->modem, "mbim");
+		return TRUE;
+	}
+
+	return FALSE;
 }
 
 static struct {
