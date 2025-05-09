@@ -2397,8 +2397,9 @@ static void check_net_device(struct udev_device *device)
 	const char *iflink;
 	struct udev_device *parent;
 
-	parent = udev_device_get_parent(device);
-	if (parent && l_streq0(udev_device_get_subsystem(parent), "mhi")) {
+	parent = udev_device_get_parent_with_subsystem_devtype(device,
+								"mhi", NULL);
+	if (parent) {
 		parent = udev_device_get_parent_with_subsystem_devtype(device,
 								"pci", NULL);
 		if (parent)
