@@ -1972,8 +1972,9 @@ static void add_device(const char *modem_syspath, const char *modem_devname,
 		g_hash_table_replace(modem_list, modem->syspath, modem);
 	}
 
+	devnode = udev_device_get_devnode(device);
+
 	if (modem->type == MODEM_TYPE_USB) {
-		devnode = udev_device_get_devnode(device);
 		usb_interface = udev_device_get_parent_with_subsystem_devtype(
 							device, "usb",
 							"usb_interface");
@@ -1990,7 +1991,6 @@ static void add_device(const char *modem_syspath, const char *modem_devname,
 			label = udev_device_get_property_value(usb_interface,
 							"OFONO_LABEL");
 	} else {
-		devnode = NULL;
 		interface = udev_device_get_property_value(device,
 							"INTERFACE");
 		number = NULL;
