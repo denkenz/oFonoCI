@@ -141,7 +141,7 @@ error:
 }
 
 static void mbim_device_subscribe_list_set_cb(struct mbim_message *message,
-						void *user)
+								void *user)
 {
 	struct ofono_modem *modem = user;
 	struct mbim_data *md = ofono_modem_get_data(modem);
@@ -152,8 +152,8 @@ static void mbim_device_subscribe_list_set_cb(struct mbim_message *message,
 	message = mbim_message_new(mbim_uuid_basic_connect,
 					MBIM_CID_RADIO_STATE,
 					MBIM_COMMAND_TYPE_SET);
-
 	mbim_message_set_arguments(message, "u", 0);
+
 	if (mbim_device_send(md->device, 0, message,
 				mbim_radio_state_init_cb, modem, NULL))
 		return;
@@ -162,7 +162,50 @@ error:
 	mbim_device_shutdown(md->device);
 }
 
-static void mbim_device_caps_info_cb(struct mbim_message *message, void *user)
+static void mbim_device_services_query_cb(struct mbim_message *message,
+								void *user)
+{
+	struct ofono_modem *modem = user;
+	struct mbim_data *md = ofono_modem_get_data(modem);
+	uint32_t dsc;	/* DeviceServicesCount */
+	uint32_t mds;	/* MaxDssSessions */
+	bool r;
+
+	if (mbim_message_get_error(message) != 0)
+		goto error;
+
+	r = mbim_message_get_arguments(message, "uu", &dsc, &mds);
+	if (!r)
+		return;
+
+	DBG("DeviceServicesCount: %u, MaxDssSessions: %u", dsc, mds);
+
+	message = mbim_message_new(mbim_uuid_basic_connect,
+					MBIM_CID_DEVICE_SERVICE_SUBSCRIBE_LIST,
+					MBIM_COMMAND_TYPE_SET);
+	mbim_message_set_arguments(message, "av", 2,
+					"16yuuuuuuu",
+					mbim_uuid_basic_connect, 6,
+					MBIM_CID_SUBSCRIBER_READY_STATUS,
+					MBIM_CID_RADIO_STATE,
+					MBIM_CID_REGISTER_STATE,
+					MBIM_CID_PACKET_SERVICE,
+					MBIM_CID_SIGNAL_STATE,
+					MBIM_CID_CONNECT,
+					"16yuuuu", mbim_uuid_sms, 3,
+					MBIM_CID_SMS_CONFIGURATION,
+					MBIM_CID_SMS_READ,
+					MBIM_CID_SMS_MESSAGE_STORE_STATUS);
+
+	if (mbim_device_send(md->device, 0, message,
+				mbim_device_subscribe_list_set_cb, modem, NULL))
+		return;
+
+error:
+	mbim_device_shutdown(md->device);
+}
+
+static void mbim_device_caps_query_cb(struct mbim_message *message, void *user)
 {
 	struct ofono_modem *modem = user;
 	struct mbim_data *md = ofono_modem_get_data(modem);
@@ -207,26 +250,12 @@ static void mbim_device_caps_info_cb(struct mbim_message *message, void *user)
 	l_free(hardware_info);
 
 	message = mbim_message_new(mbim_uuid_basic_connect,
-					MBIM_CID_DEVICE_SERVICE_SUBSCRIBE_LIST,
-					MBIM_COMMAND_TYPE_SET);
-
-	mbim_message_set_arguments(message, "av", 2,
-					"16yuuuuuuu",
-					mbim_uuid_basic_connect, 6,
-					MBIM_CID_SUBSCRIBER_READY_STATUS,
-					MBIM_CID_RADIO_STATE,
-					MBIM_CID_REGISTER_STATE,
-					MBIM_CID_PACKET_SERVICE,
-					MBIM_CID_SIGNAL_STATE,
-					MBIM_CID_CONNECT,
-					"16yuuuu", mbim_uuid_sms, 3,
-					MBIM_CID_SMS_CONFIGURATION,
-					MBIM_CID_SMS_READ,
-					MBIM_CID_SMS_MESSAGE_STORE_STATUS);
+					MBIM_CID_DEVICE_SERVICES,
+					MBIM_COMMAND_TYPE_QUERY);
+	mbim_message_set_arguments(message, "");
 
 	if (mbim_device_send(md->device, 0, message,
-				mbim_device_subscribe_list_set_cb,
-				modem, NULL))
+				mbim_device_services_query_cb, modem, NULL))
 		return;
 
 error:
@@ -248,13 +277,15 @@ static void mbim_device_ready(void *user_data)
 {
 	struct ofono_modem *modem = user_data;
 	struct mbim_data *md = ofono_modem_get_data(modem);
-	struct mbim_message *message =
-		mbim_message_new(mbim_uuid_basic_connect,
-					1, MBIM_COMMAND_TYPE_QUERY);
+	struct mbim_message *message;
 
+	message = mbim_message_new(mbim_uuid_basic_connect,
+					MBIM_CID_DEVICE_CAPS,
+					MBIM_COMMAND_TYPE_QUERY);
 	mbim_message_set_arguments(message, "");
+
 	mbim_device_send(md->device, 0, message,
-				mbim_device_caps_info_cb, modem, NULL);
+				mbim_device_caps_query_cb, modem, NULL);
 }
 
 static int mbim_enable(struct ofono_modem *modem)
