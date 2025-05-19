@@ -50,7 +50,7 @@ bool mbim_message_get_ipv4_element(struct mbim_message *message,
 					uint32_t offset,
 					uint32_t *prefix_len,
 					struct in_addr *addr);
-bool mbim_message_get_ipv6_address(struct mbim_message *essage,
+bool mbim_message_get_ipv6_address(struct mbim_message *message,
 					uint32_t offset,
 					struct in6_addr *addr);
 bool mbim_message_get_ipv6_element(struct mbim_message *message,
