@@ -66,11 +66,30 @@ static int mbim_parse_descriptors(struct mbim_data *md, const char *file)
 		return -ENOENT;
 	}
 
-	if (desc)
-		md->max_segment = L_LE16_TO_CPU(desc->wMaxControlMessage);
+	if (desc) {
+		DBG("bcdMBIMVersion: 0x%04x",
+			L_LE16_TO_CPU(desc->bcdMBIMVersion));
+		DBG("wMaxControlMessage: %u",
+			L_LE16_TO_CPU(desc->wMaxControlMessage));
+		DBG("bNumberFilters: %u", desc->bNumberFilters);
+		DBG("bMaxFilterSize: %u", desc->bMaxFilterSize);
+		DBG("wMaxSegmentSize: %u",
+			L_LE16_TO_CPU(desc->wMaxSegmentSize));
+		DBG("bmNetworkCapabilities: 0x%02x",
+			desc->bmNetworkCapabilities);
 
-	if (ext_desc)
+		md->max_segment = L_LE16_TO_CPU(desc->wMaxControlMessage);
+	}
+
+	if (ext_desc) {
+		DBG("bcdMBIMExtendedVersion: 0x%04x",
+			L_LE16_TO_CPU(ext_desc->bcdMBIMExtendedVersion));
+		DBG("bMaxOutstandingCommandMessages: %u",
+			ext_desc->bMaxOutstandingCommandMessages);
+		DBG("wMTU: %u", L_LE16_TO_CPU(ext_desc->wMTU));
+
 		md->max_outstanding = ext_desc->bMaxOutstandingCommandMessages;
+	}
 
 	l_free(data);
 	return 0;
