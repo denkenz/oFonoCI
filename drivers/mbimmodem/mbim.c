@@ -472,7 +472,8 @@ static bool command_write_handler(struct l_io *io, void *user_data)
 
 		written = L_TFR(write(fd, buf, pos));
 
-		l_info("n_iov: %zu, %zu", n_iov + 1, (size_t) written);
+		l_util_debug(device->debug_handler, device->debug_data,
+				"n_iov: %zu, %zu", n_iov + 1, (size_t) written);
 
 		if (written < 0)
 			return false;
@@ -629,10 +630,13 @@ static bool command_read_handler(struct l_io *io, void *user_data)
 		n_iov += 1;
 	}
 
-	l_info("hdr->len: %u", L_LE32_TO_CPU(hdr->len));
-	l_info("header_size: %u", header_size);
-	l_info("header_offset: %zu", device->header_offset);
-	l_info("segment_bytes_remaining: %zu", device->segment_bytes_remaining);
+	l_util_debug(device->debug_handler, device->debug_data,
+			"hdr->len: %u, header_size: %u, header_offset: %zu",
+			L_LE32_TO_CPU(hdr->len), header_size,
+			device->header_offset);
+	l_util_debug(device->debug_handler, device->debug_data,
+			"segment_bytes_remaining: %zu",
+			device->segment_bytes_remaining);
 
 	iov[n_iov].iov_base = device->segment + L_LE32_TO_CPU(hdr->len) -
 				device->header_offset -
