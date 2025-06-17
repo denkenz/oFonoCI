@@ -22,6 +22,7 @@
 #include <glib.h>
 #include <gatchat.h>
 #include <gattty.h>
+#include <ell/ell.h>
 
 #define OFONO_API_SUBJECT_TO_CHANGE
 #include <ofono/plugin.h>
@@ -57,6 +58,9 @@ struct sim7100_data {
 	GAtChat *at;
 	GAtChat *ppp;
 	enum sim7x00_model model;
+	struct l_timeout *init_timeout;
+	size_t init_count;
+	guint init_cmd;
 };
 
 static void sim7100_debug(const char *str, void *user_data)
@@ -98,6 +102,7 @@ static void sim7100_remove(struct ofono_modem *modem)
 		g_at_chat_unref(data->ppp);
 
 	ofono_modem_set_data(modem, NULL);
+	l_timeout_remove(data->init_timeout);
 	g_free(data);
 }
 
@@ -154,6 +159,50 @@ static void cgmm_cb(gboolean ok, GAtResult *result, gpointer user_data)
 									NULL);
 }
 
+static void init_cmd_cb(gboolean ok, GAtResult *result, void *user_data)
+{
+	struct ofono_modem *modem = user_data;
+	struct sim7100_data *data = ofono_modem_get_data(modem);
+
+	DBG("%p", modem);
+
+	/* ensure modem is in a known state; verbose on, echo/quiet off */
+	g_at_chat_send(data->at, "ATE0Q0V1", NULL, NULL, NULL, NULL);
+
+	/* query modem model string */
+	g_at_chat_send(data->at, "AT+CGMM", NULL, cgmm_cb, modem,
+			NULL);
+
+	l_timeout_remove(data->init_timeout);
+	data->init_timeout = NULL;
+}
+
+static void close_serial(struct ofono_modem *modem)
+{
+	struct sim7100_data *data = ofono_modem_get_data(modem);
+
+	g_at_chat_unref(data->ppp);
+	g_at_chat_unref(data->at);
+	data->at = data->ppp = NULL;
+}
+
+static void init_timeout_cb(struct l_timeout *timeout, void *user_data)
+{
+	struct ofono_modem *modem = user_data;
+	struct sim7100_data *data = ofono_modem_get_data(modem);
+
+	DBG("%p", modem);
+
+	if (data->init_count++ >= 30) {
+		ofono_error("failed to init modem after 30 attempts");
+		close_serial(modem);
+		return;
+	}
+
+	g_at_chat_retry(data->at, data->init_cmd);
+	l_timeout_modify_ms(timeout, 500);
+}
+
 static int open_device(struct ofono_modem *modem, char *devkey, GAtChat **chat)
 {
 	DBG("devkey=%s", devkey);
@@ -180,11 +229,11 @@ static int sim7100_enable(struct ofono_modem *modem)
 	if (err < 0)
 		return err;
 
-	/* ensure modem is in a known state; verbose on, echo/quiet off */
-	g_at_chat_send(data->at, "ATE0Q0V1", NULL, NULL, NULL, NULL);
-
-	/* query modem model string */
-	g_at_chat_send(data->at, "AT+CGMM", NULL, cgmm_cb, modem, NULL);
+	data->init_count = 0;
+	data->init_cmd = g_at_chat_send(data->at, "AT", NULL,
+			init_cmd_cb, modem, NULL);
+	data->init_timeout = l_timeout_create_ms(500, init_timeout_cb, modem,
+			NULL);
 
 	return -EINPROGRESS;
 }
@@ -192,13 +241,10 @@ static int sim7100_enable(struct ofono_modem *modem)
 static void cfun_set_off_cb(gboolean ok, GAtResult *result, gpointer user_data)
 {
 	struct ofono_modem *modem = user_data;
-	struct sim7100_data *data = ofono_modem_get_data(modem);
 
 	DBG("");
 
-	g_at_chat_unref(data->ppp);
-	g_at_chat_unref(data->at);
-	data->at = data->ppp = NULL;
+	close_serial(modem);
 
 	if (ok)
 		ofono_modem_set_powered(modem, FALSE);
