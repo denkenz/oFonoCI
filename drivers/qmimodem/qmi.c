@@ -1424,7 +1424,9 @@ static void qmux_create_client_timeout(struct l_timeout *timeout,
 
 	/* remove request from queues */
 	find_control_request(qmux, req->super.tid);
-	__request_free(&req->super);
+
+	if (req->super.free_request)
+		req->super.free_request(&req->super);
 }
 
 static void qmux_create_client_callback(struct qmi_request *r,
