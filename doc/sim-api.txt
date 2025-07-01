@@ -227,3 +227,10 @@ Properties	boolean Present [readonly]
 
 			This property will range from 1 (default) to
 			CardSlotCount (max) value.
+
+		array{string} ForbiddenPLMN
+
+			The list contains a list of forbidden PLMNs
+			(Mobile Country Code (MCC) and Mobile Network Code (MNC)).
+
+			Max allowed elements in sim is 4.
