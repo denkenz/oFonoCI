@@ -150,6 +150,11 @@ struct msisdn_set_request {
 	DBusMessage *msg;
 };
 
+struct fplmn_set_request {
+	struct ofono_sim *sim;
+	DBusMessage *msg;
+};
+
 struct service_number {
 	char *id;
 	struct ofono_phone_number ph;
@@ -683,6 +688,37 @@ static gboolean set_own_numbers(struct ofono_sim *sim,
 	return TRUE;
 }
 
+static void sim_efplmn_cb(const struct ofono_error *error, void *data)
+{
+	DBusMessage *reply;
+	struct fplmn_set_request *req = data;
+
+	if (error->type != OFONO_ERROR_TYPE_NO_ERROR) {
+		ofono_error("Unable to clear Forbidden PLMN");
+		reply = __ofono_error_failed(req->msg);
+	} else {
+		reply = dbus_message_new_method_return(req->msg);
+	}
+
+	__ofono_dbus_pending_reply(&req->msg, reply);
+
+	l_free(req);
+}
+
+static void sim_set_forbidden_plmn(struct ofono_sim *sim,
+				   const uint8_t *plmn_list, DBusMessage *msg)
+{
+	struct fplmn_set_request *req;
+
+	req = l_new(struct fplmn_set_request, 1);
+
+	req->sim = sim;
+	req->msg = dbus_message_ref(msg);
+
+	sim->driver->write_file_transparent(sim, SIM_EF_PLMN_FILEID, 0, 12,
+					plmn_list, NULL, 0, sim_efplmn_cb, req);
+}
+
 static void sim_set_slot_callback(const struct ofono_error *error, void *data)
 {
 	struct ofono_sim *sim = data;
@@ -721,6 +757,7 @@ static DBusMessage *sim_set_property(DBusConnection *conn, DBusMessage *msg,
 	DBusMessageIter var;
 	DBusMessageIter var_elem;
 	const char *name, *value;
+	uint8_t plmn_list[12], i;
 
 	if (!dbus_message_iter_init(msg, &iter))
 		return __ofono_error_invalid_args(msg);
@@ -810,6 +847,51 @@ error:
 		sim->driver->set_active_card_slot(sim, value - 1,
 							sim_set_slot_callback,
 							sim);
+		return NULL;
+	} else if (!strcmp(name, "ForbiddenPLMN")) {
+		dbus_message_iter_next(&iter);
+
+		if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_VARIANT)
+			return __ofono_error_invalid_args(msg);
+
+		dbus_message_iter_recurse(&iter, &var);
+
+		if (dbus_message_iter_get_arg_type(&var) != DBUS_TYPE_ARRAY ||
+				dbus_message_iter_get_element_type(&var) !=
+				DBUS_TYPE_STRING)
+			return __ofono_error_invalid_args(msg);
+
+		dbus_message_iter_recurse(&var, &var_elem);
+
+		i = 0;
+		memset(plmn_list, 0xFF, sizeof(plmn_list));
+
+		/* Empty lists are supported */
+		while (dbus_message_iter_get_arg_type(&var_elem) !=
+				DBUS_TYPE_INVALID) {
+			if (dbus_message_iter_get_arg_type(&var_elem) !=
+					DBUS_TYPE_STRING)
+				return __ofono_error_invalid_args(msg);
+
+			if (i > 3)
+				return __ofono_error_invalid_args(msg);
+
+			dbus_message_iter_get_basic(&var_elem, &value);
+
+			DBG("%s %d", value, strlen(value));
+
+			if (!(strlen(value) == 5 || strlen(value) == 6))
+				return __ofono_error_invalid_args(msg);
+
+			sim_encode_mcc_mnc(plmn_list + i * 3, value, value + 3);
+
+			i++;
+
+			dbus_message_iter_next(&var_elem);
+		}
+
+		sim_set_forbidden_plmn(sim, plmn_list, msg);
+
 		return NULL;
 	}
 
