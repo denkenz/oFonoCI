@@ -10,6 +10,7 @@
 
 #define SIM_EFSPN_DC_HOME_PLMN_BIT 0x1
 #define SIM_EFSPN_DC_ROAMING_SPN_BIT 0x2
+#define SIM_MAX_FPLMN 4
 
 enum sim_fileid {
 	SIM_EFPL_FILEID =			0x2F05,

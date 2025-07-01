@@ -55,6 +55,11 @@ struct ofono_sim_aid_session {
 	enum session_state state;
 };
 
+struct ofono_fplmn {
+	char mcc[OFONO_MAX_MCC_LENGTH + 1];
+	char mnc[OFONO_MAX_MNC_LENGTH + 1];
+};
+
 struct ofono_sim {
 	/* Contents of the SIM file system, in rough initialization order */
 	char *iccid;
@@ -118,6 +123,8 @@ struct ofono_sim {
 	unsigned int card_slot_count;
 	unsigned int active_card_slot;
 	unsigned int pending_active_card_slot;
+
+	struct ofono_fplmn fplmn[SIM_MAX_FPLMN];
 
 	GSList *aid_sessions;
 	GSList *aid_list;
@@ -341,6 +348,25 @@ static char **get_service_numbers(GSList *service_numbers)
 	return ret;
 }
 
+static char **get_fplmns(struct ofono_sim *sim)
+{
+	int i;
+	char **ret;
+
+	ret = l_new(char *, SIM_MAX_FPLMN + 1);
+
+	for (i = 0; i < SIM_MAX_FPLMN; i++) {
+		if (sim->fplmn[i].mcc[0] != 0) {
+			ret[i] = l_strdup_printf("%s%s", sim->fplmn[i].mcc,
+					sim->fplmn[i].mnc);
+
+			DBG("%s", ret[i]);
+		}
+	}
+
+	return ret;
+}
+
 static void service_number_free(gpointer pointer)
 {
 	struct service_number *num = pointer;
@@ -377,6 +403,9 @@ static DBusMessage *sim_get_properties(DBusConnection *conn,
 	dbus_bool_t present = sim->state != OFONO_SIM_STATE_NOT_PRESENT;
 	dbus_bool_t fdn;
 	dbus_bool_t bdn;
+	char **fplmn;
+
+	DBG("");
 
 	reply = dbus_message_new_method_return(msg);
 	if (reply == NULL)
@@ -464,6 +493,11 @@ static DBusMessage *sim_get_properties(DBusConnection *conn,
 
 	ofono_dbus_dict_append(&dict, "ActiveCardSlot", DBUS_TYPE_UINT32,
 							&sim->active_card_slot);
+
+	fplmn = get_fplmns(sim);
+	ofono_dbus_dict_append_array(&dict, "ForbiddenPLMN",
+					DBUS_TYPE_STRING, &fplmn);
+	l_strv_free(fplmn);
 
 	g_free(pin_retries_dict);
 	g_free(dbus_retries);
@@ -1720,6 +1754,29 @@ static void sim_efimg_changed(int id, void *userdata)
 	/* TODO: notify D-bus clients */
 }
 
+static void sim_fplmn_cb(const struct ofono_error *error,
+			 const unsigned char *data, int len, void *user)
+{
+	struct ofono_sim *sim = user;
+	int i;
+
+	if (error->type != OFONO_ERROR_TYPE_NO_ERROR || len != 12) {
+		ofono_error("Unable to read Forbidden PLMN");
+		return;
+	}
+
+	for (i = 0; i < SIM_MAX_FPLMN; i++, data += 3) {
+		/* Only update valid entries */
+		if (*data != 0xff) {
+			sim_parse_mcc_mnc(data, sim->fplmn[i].mcc, sim->fplmn[i].mnc);
+			sim->fplmn[i].mcc[OFONO_MAX_MCC_LENGTH] = '\0';
+			sim->fplmn[i].mnc[OFONO_MAX_MNC_LENGTH] = '\0';
+
+			DBG("fplmn[%d] mcc %s, mnc %s\n", i, sim->fplmn[i].mcc, sim->fplmn[i].mnc);
+		}
+	}
+}
+
 static void sim_ready(enum ofono_sim_state new_state, void *user)
 {
 	struct ofono_sim *sim = user;
@@ -1752,6 +1809,9 @@ static void sim_ready(enum ofono_sim_state new_state, void *user)
 			OFONO_SIM_FILE_STRUCTURE_FIXED, sim_efimg_read_cb, sim);
 	ofono_sim_add_file_watch(sim->context, SIM_EFIMG_FILEID,
 					sim_efimg_changed, sim, NULL);
+
+	sim->driver->read_file_transparent(sim, SIM_EF_PLMN_FILEID, 0, 12,
+						NULL, 0, sim_fplmn_cb, sim);
 }
 
 static void sim_set_ready(struct ofono_sim *sim)
