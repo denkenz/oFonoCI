@@ -143,6 +143,11 @@ struct msisdn_set_request {
 	DBusMessage *msg;
 };
 
+struct fplmn_set_request {
+	struct ofono_sim *sim;
+	DBusMessage *msg;
+};
+
 struct service_number {
 	char *id;
 	struct ofono_phone_number ph;
@@ -649,6 +654,41 @@ static gboolean set_own_numbers(struct ofono_sim *sim,
 	return TRUE;
 }
 
+static void sim_efplmn_cb(const struct ofono_error *error, void *data)
+{
+	struct ofono_sim *sim = data;
+	DBusMessage *reply;
+
+	if (error->type != OFONO_ERROR_TYPE_NO_ERROR) {
+		ofono_error("Unable to clear Forbidden PLMN");
+		reply = __ofono_error_failed(sim->pending);
+	} else {
+		reply = dbus_message_new_method_return(sim->pending);
+	}
+
+	__ofono_dbus_pending_reply(&sim->pending, reply);
+}
+
+static DBusMessage *sim_clear_forbidden_plmn(DBusConnection *conn, DBusMessage *msg,
+					void *data)
+{
+	struct ofono_sim *sim = data;
+	DBusMessageIter iter;
+	DBusMessageIter var;
+	static uint8_t plmn_list[12] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+					0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+	if (sim->pending)
+		return __ofono_error_busy(msg);
+
+	sim->pending = dbus_message_ref(msg);
+
+	sim->driver->write_file_transparent(sim, SIM_EF_PLMN_FILEID, 0, 12,
+					plmn_list, NULL, 0, sim_efplmn_cb, sim);
+
+	return NULL;
+}
+
 static void sim_set_slot_callback(const struct ofono_error *error, void *data)
 {
 	struct ofono_sim *sim = data;
@@ -687,6 +727,7 @@ static DBusMessage *sim_set_property(DBusConnection *conn, DBusMessage *msg,
 	DBusMessageIter var;
 	DBusMessageIter var_elem;
 	const char *name, *value;
+	ofono_bool_t clear_fplmn;
 
 	if (!dbus_message_iter_init(msg, &iter))
 		return __ofono_error_invalid_args(msg);
@@ -1297,6 +1338,8 @@ static const GDBusMethodTable sim_methods[] = {
 	{ GDBUS_ASYNC_METHOD("SetProperty",
 			GDBUS_ARGS({ "property", "s" }, { "value", "v" }),
 			NULL, sim_set_property) },
+	{ GDBUS_ASYNC_METHOD("ClearForbiddenNetworkOperators",
+			NULL, NULL, sim_clear_forbidden_plmn) },
 	{ GDBUS_ASYNC_METHOD("ChangePin",
 			GDBUS_ARGS({ "type", "s" }, { "oldpin", "s" },
 						{ "newpin", "s" }), NULL,
