@@ -649,6 +649,83 @@ static gboolean set_own_numbers(struct ofono_sim *sim,
 	return TRUE;
 }
 
+static void sim_efplmn_cb(const struct ofono_error *error, void *data)
+{
+	struct ofono_sim *sim = data;
+	DBusMessage *reply;
+
+	if (error->type != OFONO_ERROR_TYPE_NO_ERROR) {
+		ofono_error("Unable to clear Forbidden PLMN");
+		reply = __ofono_error_failed(sim->pending);
+	} else {
+		reply = dbus_message_new_method_return(sim->pending);
+	}
+
+	__ofono_dbus_pending_reply(&sim->pending, reply);
+}
+
+static void sim_fplmn_info_read_cb(int ok, unsigned char file_status,
+					int total_length, int record_length,
+					void *userdata)
+{
+	struct ofono_sim *sim = userdata;
+	uint8_t *plmn_list;
+	DBusMessage *reply;
+
+	if (!ok) {
+		reply = __ofono_error_failed(sim->pending);
+		goto out;
+	}
+
+	if (!(file_status & SIM_FILE_STATUS_VALID)) {
+		reply = __ofono_error_failed(sim->pending);
+		goto out;
+	}
+
+	if (sim->driver->write_file_transparent == NULL) {
+		reply = __ofono_error_not_implemented(sim->pending);
+		goto out;
+	}
+
+	DBG("total_length %d", total_length);
+
+	/* Minimum size according TS 31.102, Section 4.2.16 is 3n bytes, (n≥ 4) */
+	if (total_length < 12 || total_length % 3 != 0) {
+		reply = __ofono_error_failed(sim->pending);
+		goto out;
+	}
+
+	plmn_list = l_malloc(total_length);
+	memset(plmn_list, 0xFF, total_length);
+
+	sim->driver->write_file_transparent(sim, SIM_EF_FPLMN_FILEID, 0, total_length,
+					plmn_list, NULL, 0, sim_efplmn_cb, sim);
+
+	l_free(plmn_list);
+
+	return;
+
+out:
+	__ofono_dbus_pending_reply(&sim->pending, reply);
+}
+
+static DBusMessage *sim_clear_forbidden_plmn(DBusConnection *conn, DBusMessage *msg,
+					void *data)
+{
+	struct ofono_sim *sim = data;
+
+	if (sim->pending)
+		return __ofono_error_busy(msg);
+
+	sim->pending = dbus_message_ref(msg);
+
+	sim_fs_read_info(sim->context, SIM_EF_FPLMN_FILEID,
+			OFONO_SIM_FILE_STRUCTURE_TRANSPARENT,
+			sim_fplmn_info_read_cb, sim);
+
+	return NULL;
+}
+
 static void sim_set_slot_callback(const struct ofono_error *error, void *data)
 {
 	struct ofono_sim *sim = data;
@@ -1297,6 +1374,8 @@ static const GDBusMethodTable sim_methods[] = {
 	{ GDBUS_ASYNC_METHOD("SetProperty",
 			GDBUS_ARGS({ "property", "s" }, { "value", "v" }),
 			NULL, sim_set_property) },
+	{ GDBUS_ASYNC_METHOD("ClearForbiddenNetworkOperators",
+			NULL, NULL, sim_clear_forbidden_plmn) },
 	{ GDBUS_ASYNC_METHOD("ChangePin",
 			GDBUS_ARGS({ "type", "s" }, { "oldpin", "s" },
 						{ "newpin", "s" }), NULL,
