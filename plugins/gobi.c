@@ -57,6 +57,7 @@
 #define GOBI_UIM	(1 << 5)
 #define GOBI_VOICE	(1 << 6)
 #define GOBI_WDA	(1 << 7)
+#define GOBI_LTE	(1 << 8)
 
 #define MAX_CONTEXTS 4
 #define DEFAULT_MTU 1400
@@ -262,8 +263,13 @@ static int gobi_probe(struct ofono_modem *modem)
 	/* See drivers/net/ethernet/qualcomm/rmnet/rmnet_private.h */
 	data->max_aggregation_size = 16384;
 
+	if (ofono_modem_get_boolean(modem, "LTE"))
+		data->features |= GOBI_LTE;
+
 	ofono_modem_set_data(modem, data);
-	ofono_modem_set_capabilities(modem, OFONO_MODEM_CAPABILITY_LTE);
+
+	if (data->features & GOBI_LTE)
+		ofono_modem_set_capabilities(modem, OFONO_MODEM_CAPABILITY_LTE);
 
 	return 0;
 }
@@ -442,7 +448,7 @@ static void get_oper_mode_cb(struct qmi_result *result, void *user_data)
 	switch (data->oper_mode) {
 	case QMI_DMS_OPER_MODE_ONLINE:
 		param = qmi_param_new_uint8(QMI_DMS_PARAM_OPER_MODE,
-					QMI_DMS_OPER_MODE_LOW_POWER);
+					QMI_DMS_OPER_MODE_PERSIST_LOW_POWER);
 		if (!param) {
 			shutdown_device(modem);
 			return;
@@ -527,7 +533,7 @@ error:
 	shutdown_device(modem);
 }
 
-static uint32_t start_service_requests(struct ofono_modem *modem)
+static bool start_service_requests(struct ofono_modem *modem)
 {
 	struct gobi_data *data = ofono_modem_get_data(modem);
 	unsigned int i;
@@ -570,7 +576,7 @@ static void rmnet_get_interfaces_cb(int error, unsigned int n_interfaces,
 				sizeof(struct rmnet_ifinfo) * n_interfaces);
 	data->n_premux = n_interfaces;
 
-	if (start_service_requests(modem) > 0)
+	if (start_service_requests(modem))
 		return;
 error:
 	shutdown_device(modem);
@@ -618,7 +624,7 @@ static void enable_set_mtu_cb(int error, uint16_t type,
 		goto error;
 	}
 
-	if (start_service_requests(modem) > 0)
+	if (start_service_requests(modem))
 		return;
 error:
 	shutdown_device(modem);
@@ -717,7 +723,7 @@ static void create_wda_cb(struct qmi_service *service, void *user_data)
 		DBG("Failed to request WDA service, assume 802.3");
 
 		if (qmi_qmux_device_create_client(data->device, QMI_SERVICE_DMS,
-					request_service_cb, modem, NULL) > 0)
+					request_service_cb, modem, NULL))
 			return;
 
 		goto error;
@@ -792,11 +798,16 @@ static void discover_cb(void *user_data)
 		add_service_request(data, &data->wms, QMI_SERVICE_WMS);
 	if (data->features & GOBI_VOICE)
 		add_service_request(data, &data->voice, QMI_SERVICE_VOICE);
+	if (data->features & GOBI_PDS)
+		add_service_request(data, &data->pds, QMI_SERVICE_PDS);
 	if (data->features & GOBI_UIM)
 		add_service_request(data, &data->uim, QMI_SERVICE_UIM);
 
-	if (qmi_qmux_device_create_client(data->device, QMI_SERVICE_WDA,
-						create_wda_cb, modem, NULL))
+	if (data->features & GOBI_WDA) {
+		if (qmi_qmux_device_create_client(data->device,
+				QMI_SERVICE_WDA, create_wda_cb, modem, NULL))
+			return;
+	} else if (start_service_requests(modem))
 		return;
 
 error:
@@ -922,7 +933,7 @@ static int gobi_disable(struct ofono_modem *modem)
 		goto out;
 
 	param = qmi_param_new_uint8(QMI_DMS_PARAM_OPER_MODE,
-					QMI_DMS_OPER_MODE_LOW_POWER);
+					QMI_DMS_OPER_MODE_PERSIST_LOW_POWER);
 	if (!param)
 		return -ENOMEM;
 
@@ -1139,7 +1150,7 @@ static void gobi_post_sim(struct ofono_modem *modem)
 
 	DBG("%p", modem);
 
-	if (data->features & GOBI_WDS)
+	if (data->features & GOBI_WDS && data->features & GOBI_LTE)
 		ofono_lte_create(modem, 0, "qmimodem",
 					qmi_service_clone(data->wds));
 
