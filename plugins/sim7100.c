@@ -106,13 +106,49 @@ static void sim7100_remove(struct ofono_modem *modem)
 	g_free(data);
 }
 
-static void cfun_set_on_cb(gboolean ok, GAtResult *result, gpointer user_data)
+static void ppptim_cb(gboolean ok, GAtResult *result, gpointer user_data)
 {
 	struct ofono_modem *modem = user_data;
 
 	DBG("");
 
-	if (ok)
+	ofono_modem_set_powered(modem, TRUE);
+}
+
+static void ppptim_support_cb(gboolean ok, GAtResult *result,
+			      gpointer user_data)
+{
+	struct ofono_modem *modem = user_data;
+	struct sim7100_data *data = ofono_modem_get_data(modem);
+
+	DBG("");
+
+	if (ok) {
+		/* enable reset of PPP state upon AT+CFUN=0 for A76XX modems */
+		g_at_chat_send(data->at, "AT+PPPTIM=1", NULL, ppptim_cb,
+			       modem, NULL);
+	} else {
+		ofono_warn("modem doesn't support ppp reset on disable; is the "
+			   "firmware up to date?");
+		ofono_modem_set_powered(modem, TRUE);
+	}
+}
+
+static void cfun_set_on_cb(gboolean ok, GAtResult *result, gpointer user_data)
+{
+	struct ofono_modem *modem = user_data;
+	struct sim7100_data *data = ofono_modem_get_data(modem);
+
+	DBG("");
+
+	if (!ok)
+		return;
+
+	if (data->model == SIMCOM_A76XX)
+		/* does the modem support reset of PPP state upon AT+CFUN=0? */
+		g_at_chat_send(data->at, "AT+PPPTIM?", NULL, ppptim_support_cb,
+			       modem, NULL);
+	else
 		ofono_modem_set_powered(modem, TRUE);
 }
 
