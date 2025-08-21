@@ -38,6 +38,7 @@ static const char *csq_prefix[] = { "+CSQ:", NULL };
 static const char *cind_prefix[] = { "+CIND:", NULL };
 static const char *cmer_prefix[] = { "+CMER:", NULL };
 static const char *smoni_prefix[] = { "^SMONI:", NULL };
+static const char *simcom_tech_prefix[] = { "+CNSMOD:", NULL };
 static const char *zpas_prefix[] = { "+ZPAS:", NULL };
 static const char *option_tech_prefix[] = { "_OCTI:", "_OUWCTI:", NULL };
 
@@ -179,6 +180,45 @@ static int gemalto_parse_tech(GAtResult *result)
 	return tech;
 }
 
+static int simcom_parse_tech(GAtResult *result)
+{
+	GAtResultIter iter;
+	int s, stat, tech;
+
+	g_at_result_iter_init(&iter, result);
+
+	if (!g_at_result_iter_next(&iter, "+CNSMOD:"))
+		return -1;
+
+	if (!g_at_result_iter_next_number(&iter, &s))
+		return -1;
+
+	if (!g_at_result_iter_next_number(&iter, &stat))
+		return -1;
+
+	switch (stat) {
+	case 1: /* GSM */
+		tech = ACCESS_TECHNOLOGY_GSM;
+		break;
+	case 2: /* GPRS */
+		tech = ACCESS_TECHNOLOGY_GSM;
+		break;
+	case 3: /* EDGE */
+		tech = ACCESS_TECHNOLOGY_GSM_EGPRS;
+		break;
+	case 8: /* LTE */
+		tech = ACCESS_TECHNOLOGY_EUTRAN;
+		break;
+	default:
+		tech = -1;
+		break;
+	}
+
+	DBG("stat %d tech %d", stat, tech);
+
+	return tech;
+}
+
 static void at_creg_cb(gboolean ok, GAtResult *result, gpointer user_data)
 {
 	struct cb_data *cbd = user_data;
@@ -246,6 +286,18 @@ static void option_tech_cb(gboolean ok, GAtResult *result, gpointer user_data)
 		nd->tech = -1;
 }
 
+static void simcom_tech_cb(gboolean ok, GAtResult *result, gpointer user_data)
+{
+	struct cb_data *cbd = user_data;
+	struct ofono_netreg *netreg = cbd->data;
+	struct at_netreg_data *nd = ofono_netreg_get_data(netreg);
+
+	if (ok)
+		nd->tech = simcom_parse_tech(result);
+	else
+		nd->tech = -1;
+}
+
 void at_registration_status(struct ofono_netreg *netreg,
 					ofono_netreg_status_cb_t cb,
 					void *data)
@@ -297,6 +349,13 @@ void at_registration_status(struct ofono_netreg *netreg,
 		if (g_at_chat_send(nd->chat, "AT_OCTI?;_OUWCTI?",
 					option_tech_prefix,
 					option_tech_cb, cbd, NULL) == 0)
+			nd->tech = -1;
+		break;
+	case OFONO_VENDOR_SIMCOM_A76XX:
+		/* Send AT+CNSMOD? to find out the current tech */
+		if (g_at_chat_send(nd->chat, "AT+CNSMOD?",
+					simcom_tech_prefix,
+					simcom_tech_cb, cbd, NULL) == 0)
 			nd->tech = -1;
 		break;
 	}
@@ -352,13 +411,6 @@ static void cops_cb(gboolean ok, GAtResult *result, gpointer user_data)
 	/* Set to current */
 	op.status = 2;
 	op.tech = tech;
-
-	/*
-	 * SIMCom modems shows the current tech via the +COPS
-	 * not like other modems where it's shown via +CREG
-	 */
-	if (nd->vendor == OFONO_VENDOR_SIMCOM_A76XX)
-		nd->tech = tech;
 
 	DBG("cops_cb: %s, %s %s %d", name, nd->mcc, nd->mnc, tech);
 
@@ -1561,6 +1613,21 @@ static void option_query_tech_cb(gboolean ok, GAtResult *result,
 			tq->status, tq->lac, tq->ci, tech);
 }
 
+static void simcom_query_tech_cb(gboolean ok, GAtResult *result,
+						gpointer user_data)
+{
+	struct tech_query *tq = user_data;
+	int tech;
+
+	if (ok)
+		tech = simcom_parse_tech(result);
+	else
+		tech = -1;
+
+	ofono_netreg_status_notify(tq->netreg,
+			tq->status, tq->lac, tq->ci, tech);
+}
+
 static void creg_notify(GAtResult *result, gpointer user_data)
 {
 	struct ofono_netreg *netreg = user_data;
@@ -1572,8 +1639,16 @@ static void creg_notify(GAtResult *result, gpointer user_data)
 				&lac, &ci, &tech, nd->vendor) == FALSE)
 		return;
 
-	if (status != 1 && status != 5)
-		goto notify;
+	switch (status) {
+		case NETWORK_REGISTRATION_STATUS_REGISTERED:
+		case NETWORK_REGISTRATION_STATUS_ROAMING:
+		case NETWORK_REGISTRATION_STATUS_REGISTERED_SMS_EUTRAN:
+		case NETWORK_REGISTRATION_STATUS_ROAMING_SMS_EUTRAN:
+			break;
+		default:
+			goto notify;
+			break;
+	}
 
 	tq = g_try_new0(struct tech_query, 1);
 	if (tq == NULL)
@@ -1610,6 +1685,12 @@ static void creg_notify(GAtResult *result, gpointer user_data)
 		if (g_at_chat_send(nd->chat, "AT^SMONI",
 					smoni_prefix,
 					gemalto_query_tech_cb, tq, g_free) > 0)
+			return;
+		break;
+	case OFONO_VENDOR_SIMCOM_A76XX:
+		if (g_at_chat_send(nd->chat, "AT+CNSMOD?",
+					simcom_tech_prefix,
+					simcom_query_tech_cb, tq, g_free) > 0)
 			return;
 		break;
 	}
