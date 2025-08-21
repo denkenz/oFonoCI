@@ -174,7 +174,7 @@ static void cgmm_cb(gboolean ok, GAtResult *result, gpointer user_data)
 
 		DBG("modem model: %s", model);
 
-		if (g_str_has_prefix(model, "A7672"))
+		if (g_str_has_prefix(model, "A76"))
 			data->model = SIMCOM_A76XX;
 
 		break;
