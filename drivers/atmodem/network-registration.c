@@ -1575,6 +1575,8 @@ static void creg_notify(GAtResult *result, gpointer user_data)
 	switch (status) {
 		case NETWORK_REGISTRATION_STATUS_REGISTERED:
 		case NETWORK_REGISTRATION_STATUS_ROAMING:
+		case NETWORK_REGISTRATION_STATUS_REGISTERED_SMS_EUTRAN:
+		case NETWORK_REGISTRATION_STATUS_ROAMING_SMS_EUTRAN:
 			break;
 		default:
 			goto notify;
