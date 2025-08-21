@@ -1572,8 +1572,14 @@ static void creg_notify(GAtResult *result, gpointer user_data)
 				&lac, &ci, &tech, nd->vendor) == FALSE)
 		return;
 
-	if (status != 1 && status != 5)
-		goto notify;
+	switch (status) {
+		case NETWORK_REGISTRATION_STATUS_REGISTERED:
+		case NETWORK_REGISTRATION_STATUS_ROAMING:
+			break;
+		default:
+			goto notify;
+			break;
+	}
 
 	tq = g_try_new0(struct tech_query, 1);
 	if (tq == NULL)
