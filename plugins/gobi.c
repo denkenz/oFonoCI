@@ -688,10 +688,21 @@ static void set_data_format_cb(struct qmi_result *result, void *user_data)
 	DBG("");
 
 	if (!qmi_result_set_error(result, NULL)) {
+		struct qmi_wda_data_format actual;
+
 		if (!compare_data_format(data, result))
 			goto done;
 
 		ofono_error("Setting Data Format had no effect");
+
+		if (!qmi_wda_parse_data_format(result, &actual) &&
+				data->data_format == WDA_DATA_FORMAT_802_3 &&
+				actual.ll_protocol ==
+				QMI_WDA_DATA_LINK_PROTOCOL_RAW_IP) {
+			ofono_warn("Modem seems to only work in raw-ip mode");
+			data->data_format = WDA_DATA_FORMAT_RAW_IP;
+			goto done;
+		}
 	}
 
 	if (data->data_format == WDA_DATA_FORMAT_802_3)
