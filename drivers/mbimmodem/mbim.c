@@ -18,6 +18,7 @@
 #include <linux/types.h>
 
 #include <ell/ell.h>
+#include <ell/useful.h>
 
 #include "mbim.h"
 #include "mbim-message.h"
@@ -612,6 +613,15 @@ static bool command_read_handler(struct l_io *io, void *user_data)
 
 	hdr = (struct mbim_message_header *) device->header;
 	type = L_LE32_TO_CPU(hdr->type);
+
+	if (unlikely(hdr->len > MAX_CONTROL_TRANSFER)) {
+		char *hex = l_util_hexstring(device->header,
+						sizeof(struct mbim_message_header));
+		l_warn("MBIM: skip implausible hdr %s: len 0x%x type 0x%x", hex,
+			L_LE32_TO_CPU(hdr->len), L_LE32_TO_CPU(hdr->type));
+		l_free(hex);
+		return false;
+	}
 
 	if (device->segment_bytes_remaining == 0)
 		device->segment_bytes_remaining =
