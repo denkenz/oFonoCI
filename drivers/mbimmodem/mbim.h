@@ -31,6 +31,13 @@ struct mbim_message;
 #define MBIM_CID_IP_PACKET_FILTERS		23
 #define MBIM_CID_MULTICARRIER_PROVIDERS		24
 
+#define MBIM_CID_MS_BASIC_CONNECT_EXTENSIONS_VERSION	15
+
+#define MBIM_CID_MS_UICC_LOW_LEVEL_ACCESS_APPLICATION_LIST 7
+#define MBIM_CID_MS_UICC_LOW_LEVEL_ACCESS_FILE_STATUS	8
+#define MBIM_CID_MS_UICC_LOW_LEVEL_ACCESS_READ_BINARY	9
+#define MBIM_CID_MS_UICC_LOW_LEVEL_ACCESS_READ_RECORD	10
+
 #define MBIM_CID_SMS_CONFIGURATION		1
 #define MBIM_CID_SMS_READ			2
 #define MBIM_CID_SMS_SEND			3
@@ -73,6 +80,31 @@ enum mbim_data_class {
 	MBIM_DATA_CLASS_CUSTOM		= 0x80000000,
 };
 
+enum mbim_provider_state {
+	MBIM_PROVIDER_STATE_UNKNOWN                = 0,
+	MBIM_PROVIDER_STATE_HOME                   = 1 << 0,
+	MBIM_PROVIDER_STATE_FORBIDDEN              = 1 << 1,
+	MBIM_PROVIDER_STATE_PREFERRED              = 1 << 2,
+	MBIM_PROVIDER_STATE_VISIBLE                = 1 << 3,
+	MBIM_PROVIDER_STATE_REGISTERED             = 1 << 4,
+	MBIM_PROVIDER_STATE_PREFERRED_MULTICARRIER = 1 << 5
+};
+
+enum mbim_register_type {
+	MBIM_REGISTER_TYPE_AUTOMATIC    = 0,
+	MBIM_REGISTER_TYPE_MANUAL       = 1,
+};
+
+enum mbim_app_type {
+	MBIM_APP_UNKNOWN,
+	MBIM_APP_MF,
+	MBIM_APP_MF_SIM,
+	MBIM_APP_MF_RUIM,
+	MBIM_APP_USIM,
+	MBIM_APP_CSIM,
+	MBIM_APP_ISIM,
+};
+
 typedef void (*mbim_device_debug_func_t) (const char *str, void *user_data);
 typedef void (*mbim_device_disconnect_func_t) (void *user_data);
 typedef void (*mbim_device_destroy_func_t) (void *user_data);
@@ -87,6 +119,8 @@ extern const uint8_t mbim_uuid_phonebook[];
 extern const uint8_t mbim_uuid_stk[];
 extern const uint8_t mbim_uuid_auth[];
 extern const uint8_t mbim_uuid_dss[];
+extern const uint8_t mbim_ms_basic_connect_extensions[];
+extern const uint8_t mbim_ms_uicc_low_level_access[];
 
 extern const uint8_t mbim_context_type_none[];
 extern const uint8_t mbim_context_type_internet[];
@@ -117,6 +151,9 @@ bool mbim_device_set_ready_handler(struct mbim_device *device,
 					mbim_device_ready_func_t function,
 					void *user_data,
 					mbim_device_destroy_func_t destroy);
+
+bool mbim_device_mbimex_version_at_least(uint16_t mbimex_version,
+					int version_major, int version_minor);
 
 uint32_t mbim_device_send(struct mbim_device *device, uint32_t gid,
 				struct mbim_message *message,
