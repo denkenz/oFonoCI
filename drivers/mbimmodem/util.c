@@ -9,6 +9,7 @@
 #include <stdbool.h>
 
 #include "src/common.h"
+#include "simutil.h"
 #include "mbim.h"
 #include "util.h"
 
@@ -36,4 +37,34 @@ int mbim_data_class_to_tech(uint32_t n)
 		return ACCESS_TECHNOLOGY_GSM;
 
 	return -1;
+}
+
+uint8_t *mbim_get_fileid(enum mbim_app_type app_type, uint32_t fileid, int *file_id_len)
+{
+	uint8_t parent_path[6] = {0};
+	int fileid_len = 0;
+	uint8_t *full_path;
+
+	if (app_type == MBIM_APP_USIM || app_type == MBIM_APP_ISIM)
+		sim_ef_db_get_path_3g(fileid, parent_path);
+	else
+		sim_ef_db_get_path_2g(fileid, parent_path);
+
+	/* Copy the parent_path up until the first pair of 0's */
+	for (int i = 0; i < 6; i += 2) {
+		if (i != 0 && parent_path[i] == 0x00
+			&& parent_path[i + 1] == 0x00) {
+			fileid_len = i;
+			break;
+		}
+	}
+
+	full_path = l_malloc(fileid_len + 2);
+	memcpy(full_path, parent_path, fileid_len);
+
+	full_path[fileid_len] = (fileid >> 8) & 0xFF;
+	full_path[fileid_len + 1] = fileid & 0xFF;
+	*file_id_len = fileid_len + 2;
+
+	return full_path;
 }
