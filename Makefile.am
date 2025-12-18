@@ -947,6 +947,7 @@ unit_test_qmimodem_qmi_LDADD = @GLIB_LIBS@ $(ell_ldadd) -ldl
 unit_objects += $(unit_test_qmimodem_qmi_OBJECTS)
 
 unit/test-provision.db: unit/test-provision.json
+	$(AM_V_at)$(MKDIR_P) unit
 	$(AM_V_GEN)$(srcdir)/tools/provisiontool generate \
 		--infile $< --outfile $@
 
