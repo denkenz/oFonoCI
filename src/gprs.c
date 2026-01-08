@@ -2017,6 +2017,36 @@ static struct pri_context *add_context(struct ofono_gprs *gprs,
 	return context;
 }
 
+static void send_context_added_signal(struct ofono_gprs *gprs,
+					struct pri_context *context,
+					DBusConnection *conn)
+{
+	const char *path;
+	DBusMessage *signal;
+	DBusMessageIter iter;
+	DBusMessageIter dict;
+
+	path = __ofono_atom_get_path(gprs->atom);
+	signal = dbus_message_new_signal(path,
+					OFONO_CONNECTION_MANAGER_INTERFACE,
+					"ContextAdded");
+	if (!signal)
+		return;
+
+	dbus_message_iter_init_append(signal, &iter);
+
+	path = context->path;
+	dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &path);
+
+	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
+					OFONO_PROPERTIES_ARRAY_SIGNATURE,
+					&dict);
+	append_context_properties(context, &dict);
+	dbus_message_iter_close_container(&iter, &dict);
+
+	g_dbus_send_message(conn, signal);
+}
+
 void ofono_gprs_cid_activated(struct ofono_gprs  *gprs, unsigned int cid,
 				const char *apn)
 {
@@ -2076,43 +2106,10 @@ void ofono_gprs_cid_activated(struct ofono_gprs  *gprs, unsigned int cid,
 
 		strcpy(pri_ctx->context.apn, apn);
 
-		ofono_dbus_signal_property_changed(conn, pri_ctx->path,
-					OFONO_CONNECTION_CONTEXT_INTERFACE,
-					"AccessPointName",
-					DBUS_TYPE_STRING, &apn);
+		send_context_added_signal(gprs, pri_ctx, conn);
 	}
 
 	gc->driver->read_settings(gc, cid, pri_read_settings_callback, pri_ctx);
-}
-
-static void send_context_added_signal(struct ofono_gprs *gprs,
-					struct pri_context *context,
-					DBusConnection *conn)
-{
-	const char *path;
-	DBusMessage *signal;
-	DBusMessageIter iter;
-	DBusMessageIter dict;
-
-	path = __ofono_atom_get_path(gprs->atom);
-	signal = dbus_message_new_signal(path,
-					OFONO_CONNECTION_MANAGER_INTERFACE,
-					"ContextAdded");
-	if (!signal)
-		return;
-
-	dbus_message_iter_init_append(signal, &iter);
-
-	path = context->path;
-	dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &path);
-
-	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
-					OFONO_PROPERTIES_ARRAY_SIGNATURE,
-					&dict);
-	append_context_properties(context, &dict);
-	dbus_message_iter_close_container(&iter, &dict);
-
-	g_dbus_send_message(conn, signal);
 }
 
 static DBusMessage *gprs_add_context(DBusConnection *conn,
