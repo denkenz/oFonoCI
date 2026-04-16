@@ -272,8 +272,11 @@ static int sim7100_enable(struct ofono_modem *modem)
 		return err;
 
 	err = open_device(modem, "PPP", &data->ppp);
-	if (err < 0)
+	if (err < 0) {
+		g_at_chat_unref(data->at);
+		data->at = NULL;
 		return err;
+	}
 
 	data->init_count = 0;
 	data->init_cmd = g_at_chat_send(data->at, "AT", NULL,
