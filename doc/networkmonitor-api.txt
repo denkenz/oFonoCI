@@ -22,7 +22,7 @@ Methods		a{sv} GetServingCellInformation()
 			are available, their valid value ranges and
 			applicability to different cell types.
 
-			a{a{sv}} GetNeighbouringCellsInformation()
+		a{a{sv}} GetNeighbouringCellsInformation()
 
 			Requests the neighbouring cells information and basic
 			measurements from oFono.  The returned value is a
