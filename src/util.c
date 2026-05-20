@@ -2638,7 +2638,7 @@ static unsigned short codepoint_lookup(struct codepoint *key,
 					const struct codepoint *table,
 					unsigned int len)
 {
-	struct codepoint *result = NULL;
+	const struct codepoint *result;
 
 	result = bsearch(key, table, len, sizeof(struct codepoint),
 				compare_codepoints);
