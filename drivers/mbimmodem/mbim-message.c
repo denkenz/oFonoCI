@@ -139,8 +139,8 @@ static bool _iter_copy_string(struct mbim_message_iter *iter,
 					uint32_t offset, uint32_t len,
 					char **out)
 {
-	uint16_t buf[len / 2 + 1];
-	uint8_t *dest = (uint8_t *) buf;
+	uint8_t buf[len + 1];
+	uint8_t *dest = buf;
 	uint32_t remaining = len;
 	uint32_t iov_start = 0;
 	uint32_t i = 0;
@@ -164,7 +164,7 @@ static bool _iter_copy_string(struct mbim_message_iter *iter,
 	if (tocopy > remaining)
 		tocopy = remaining;
 
-	memcpy(dest, iter->iov[i].iov_base + offset - iov_start, tocopy);
+	memcpy(buf, iter->iov[i].iov_base + offset - iov_start, tocopy);
 	remaining -= tocopy;
 	dest += tocopy;
 	i += 1;
@@ -180,15 +180,21 @@ static bool _iter_copy_string(struct mbim_message_iter *iter,
 		dest += tocopy;
 	}
 
-	/* Strings are in UTF16-LE, so convert to UTF16-CPU first if needed */
-	if (L_CPU_TO_LE16(0x8000) != 0x8000) {
-		uint16_t *le = buf;
+	dest = buf;
+	if (!l_utf8_validate((const char *)dest, len, NULL)) {
+		/* Strings are in UTF16-LE, so convert to UTF16-CPU first if needed */
+		if (L_CPU_TO_LE16(0x8000) != 0x8000) {
+			uint16_t *le = (uint16_t *)dest;
 
-		for (i = 0; i < len / 2; i++)
-			le[i] = __builtin_bswap16(le[i]);
+			for (i = 0; i < len / 2; i++)
+				le[i] = __builtin_bswap16(le[i]);
+		}
+
+		*out = l_utf8_from_utf16(dest, len);
+	} else {
+		*out = l_strndup((const char *)dest, len);
 	}
 
-	*out = l_utf8_from_utf16(buf, len);
 	return true;
 }
 
@@ -303,7 +309,8 @@ static bool _iter_next_entry_basic(struct mbim_message_iter *iter,
 }
 
 static bool _iter_enter_array(struct mbim_message_iter *iter,
-					struct mbim_message_iter *array)
+					struct mbim_message_iter *array,
+					bool fixed_array)
 {
 	size_t pos;
 	uint32_t n_elem;
@@ -316,7 +323,7 @@ static bool _iter_enter_array(struct mbim_message_iter *iter,
 	if (iter->container_type == CONTAINER_TYPE_ARRAY && !iter->n_elem)
 		return false;
 
-	if (iter->sig_start[iter->sig_pos] != 'a')
+	if (iter->sig_start[iter->sig_pos] != 'a' && iter->sig_start[iter->sig_pos] != 'A')
 		return false;
 
 	sig_start = iter->sig_start + iter->sig_pos + 1;
@@ -327,7 +334,7 @@ static bool _iter_enter_array(struct mbim_message_iter *iter,
 	 * 1. Element Count, followed by OL_PAIR_LIST
 	 * 2. Offset, followed by element length or size for raw buffers
 	 */
-	fixed = is_fixed_size(sig_start, sig_end);
+	fixed = is_fixed_size(sig_start, sig_end) || fixed_array;
 
 	if (fixed) {
 		pos = align_len(iter->pos, 4);
@@ -345,7 +352,9 @@ static bool _iter_enter_array(struct mbim_message_iter *iter,
 
 	data = _iter_get_data(iter, pos);
 	n_elem = l_get_le32(data);
-	pos += 4;
+
+	if (fixed)
+		iter->pos += 4;
 
 	if (iter->container_type != CONTAINER_TYPE_ARRAY)
 		iter->sig_pos += sig_end - sig_start + 1;
@@ -439,7 +448,6 @@ static bool message_iter_next_entry_valist(struct mbim_message_iter *orig,
 	struct mbim_message_iter *iter = orig;
 	const char *signature = orig->sig_start + orig->sig_pos;
 	const char *end;
-	uint32_t *out_n_elem;
 	struct mbim_message_iter *sub_iter;
 	struct mbim_message_iter stack[MAX_NESTING];
 	unsigned int indent = 0;
@@ -512,13 +520,22 @@ static bool message_iter_next_entry_valist(struct mbim_message_iter *orig,
 				iter = &stack[indent - 1];
 			break;
 		case 'a':
-			out_n_elem = va_arg(args, uint32_t *);
 			sub_iter = va_arg(args, void *);
 
-			if (!_iter_enter_array(iter, sub_iter))
+			if (!_iter_enter_array(iter, sub_iter, false))
 				return false;
 
-			*out_n_elem = sub_iter->n_elem;
+			end = _signature_end(signature + 1);
+			signature = end + 1;
+			break;
+		/* Fixed array with an OL pair list, no element count
+		 * TODO: Implement sending fixed arrays to the modem too
+		 */
+		case 'A':
+			sub_iter = va_arg(args, void *);
+
+			if (!_iter_enter_array(iter, sub_iter, true))
+				return false;
 
 			end = _signature_end(signature + 1);
 			signature = end + 1;
