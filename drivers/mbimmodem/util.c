@@ -9,6 +9,7 @@
 #include <stdbool.h>
 
 #include "src/common.h"
+#include "simutil.h"
 #include "mbim.h"
 #include "util.h"
 
@@ -38,3 +39,48 @@ int mbim_data_class_to_tech(uint32_t n)
 	return -1;
 }
 
+int mbim_provider_state_to_status(uint32_t state)
+{
+	switch (state) {
+	case MBIM_PROVIDER_STATE_REGISTERED:
+		return OPERATOR_STATUS_CURRENT;
+
+	case MBIM_PROVIDER_STATE_VISIBLE:
+	case MBIM_PROVIDER_STATE_HOME:
+	case MBIM_PROVIDER_STATE_PREFERRED:
+	case MBIM_PROVIDER_STATE_PREFERRED_MULTICARRIER:
+		return OPERATOR_STATUS_AVAILABLE;
+
+	case MBIM_PROVIDER_STATE_FORBIDDEN:
+		return OPERATOR_STATUS_FORBIDDEN;
+
+	default:
+		return OPERATOR_STATUS_UNKNOWN;
+	}
+}
+
+uint8_t *mbim_get_fileid_new(enum mbim_app_type app_type, uint32_t fileid, int *file_id_len)
+{
+	uint8_t parent_path[6] = {0};
+	int fileid_len = 0;
+	uint8_t *full_path;
+
+	if (app_type == MBIM_APP_USIM || app_type == MBIM_APP_ISIM)
+		fileid_len = sim_ef_db_get_path_3g(fileid, parent_path);
+	else
+		fileid_len = sim_ef_db_get_path_2g(fileid, parent_path);
+
+	if (fileid_len < 2 || fileid_len > 6) {
+		*file_id_len = 0;
+		return NULL;
+	}
+
+	full_path = l_malloc(fileid_len + 2);
+	memcpy(full_path, parent_path, fileid_len);
+
+	full_path[fileid_len] = (fileid >> 8) & 0xFF;
+	full_path[fileid_len + 1] = fileid & 0xFF;
+	*file_id_len = fileid_len + 2;
+
+	return full_path;
+}
