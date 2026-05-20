@@ -51,7 +51,9 @@ static const char *cfun_prefix[] = { "+CFUN:", NULL };
 
 enum sim7x00_model {
 	SIMCOM_UNKNOWN = 0,
-	SIMCOM_A76XX,
+	SIMCOM_A7671,
+	SIMCOM_A7672,
+
 };
 
 struct sim7100_data {
@@ -144,7 +146,7 @@ static void cfun_set_on_cb(gboolean ok, GAtResult *result, gpointer user_data)
 	if (!ok)
 		return;
 
-	if (data->model == SIMCOM_A76XX)
+	if (data->model == SIMCOM_A7672)
 		/* does the modem support reset of PPP state upon AT+CFUN=0? */
 		g_at_chat_send(data->at, "AT+PPPTIM?", NULL, ppptim_support_cb,
 			       modem, NULL);
@@ -174,14 +176,17 @@ static void cgmm_cb(gboolean ok, GAtResult *result, gpointer user_data)
 
 		DBG("modem model: %s", model);
 
-		if (g_str_has_prefix(model, "A76"))
-			data->model = SIMCOM_A76XX;
+		if (g_str_has_prefix(model, "A7671"))
+			data->model = SIMCOM_A7671;
+		else if (g_str_has_prefix(model, "A7672"))
+			data->model = SIMCOM_A7672;
 
 		break;
 	}
 
 	switch (data->model) {
-	case SIMCOM_A76XX:
+	case SIMCOM_A7671:
+	case SIMCOM_A7672:
 		/* ignore NO CARRIER on the AT channel when disconnecting PPP */
 		g_at_chat_blacklist_terminator(data->at,
 					G_AT_CHAT_TERMINATOR_NO_CARRIER);
@@ -267,8 +272,11 @@ static int sim7100_enable(struct ofono_modem *modem)
 		return err;
 
 	err = open_device(modem, "PPP", &data->ppp);
-	if (err < 0)
+	if (err < 0) {
+		g_at_chat_unref(data->at);
+		data->at = NULL;
 		return err;
+	}
 
 	data->init_count = 0;
 	data->init_cmd = g_at_chat_send(data->at, "AT", NULL,
@@ -318,7 +326,8 @@ static void sim7100_pre_sim(struct ofono_modem *modem)
 	ofono_devinfo_create(modem, 0, "atmodem", data->at);
 
 	switch (data->model) {
-	case SIMCOM_A76XX:
+	case SIMCOM_A7671:
+	case SIMCOM_A7672:
 		sim = ofono_sim_create(modem, OFONO_VENDOR_SIMCOM_A76XX,
 							"atmodem", data->at);
 		ofono_voicecall_create(modem, 0, "atmodem", data->at);
@@ -351,7 +360,8 @@ static void sim7100_post_sim(struct ofono_modem *modem)
 	ofono_phonebook_create(modem, 0, "atmodem", data->at);
 
 	switch (data->model) {
-	case SIMCOM_A76XX:
+	case SIMCOM_A7671:
+	case SIMCOM_A7672:
 		ofono_netreg_create(modem, OFONO_VENDOR_SIMCOM_A76XX,
 							"atmodem", data->at);
 		ofono_sms_create(modem, OFONO_VENDOR_SIMCOM_A76XX,
