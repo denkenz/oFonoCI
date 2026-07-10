@@ -937,6 +937,44 @@ static void parse_properties(GDBusClient *client, const char *path,
 	if (g_str_equal(interface, DBUS_INTERFACE_PROPERTIES) == TRUE)
 		return;
 
+	/*
+	 * Skip BLE devices (AddressType='random') to avoid registering a
+	 * per-device PropertiesChanged watch for every advertising BLE
+	 * peripheral. ofono only needs BR/EDR devices for HFP/HSP; the
+	 * high-rate RSSI PropertiesChanged signals from BLE scanners cause
+	 * dbus-daemon memory bloat and socket backpressure in bluetoothd.
+	 *
+	 * The AddressType property is present in the InterfacesAdded dict
+	 * (iter) at this point, so it can be checked before proxy_new().
+	 */
+	if (g_str_equal(interface, "org.bluez.Device1") == TRUE) {
+		DBusMessageIter props, entry;
+		DBusMessageIter copy = *iter;
+
+		if (dbus_message_iter_get_arg_type(&copy) == DBUS_TYPE_ARRAY) {
+			dbus_message_iter_recurse(&copy, &props);
+			while (dbus_message_iter_get_arg_type(&props) ==
+						DBUS_TYPE_DICT_ENTRY) {
+				const char *key;
+				dbus_message_iter_recurse(&props, &entry);
+				dbus_message_iter_get_basic(&entry, &key);
+				if (g_str_equal(key, "AddressType") == TRUE) {
+					DBusMessageIter var;
+					const char *addr_type;
+					dbus_message_iter_next(&entry);
+					dbus_message_iter_recurse(&entry, &var);
+					dbus_message_iter_get_basic(&var,
+								&addr_type);
+					if (g_str_equal(addr_type,
+							"random") == TRUE)
+						return;
+					break;
+				}
+				dbus_message_iter_next(&props);
+			}
+		}
+	}
+
 	proxy = proxy_lookup(client, path, interface);
 	if (proxy) {
 		update_properties(proxy, iter, FALSE);
@@ -1255,14 +1293,6 @@ GDBusClient *g_dbus_client_new_full(DBusConnection *connection,
 						"InterfacesRemoved",
 						interfaces_removed,
 						client, NULL);
-	g_ptr_array_add(client->match_rules, g_strdup_printf("type='signal',"
-				"sender='%s',path_namespace='%s'",
-				client->service_name, client->base_path));
-
-	for (i = 0; i < client->match_rules->len; i++) {
-		modify_match(client->dbus_conn, "AddMatch",
-				g_ptr_array_index(client->match_rules, i));
-	}
 
 	return g_dbus_client_ref(client);
 }
