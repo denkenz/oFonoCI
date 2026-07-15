@@ -791,6 +791,43 @@ static void proxy_added(GDBusProxy *proxy, void *user_data)
 	device_changed(proxy, path);
 }
 
+static gboolean proxy_filter(GDBusClient *client, const char *path,
+				const char *interface, DBusMessageIter *iter,
+				void *user_data)
+{
+	DBusMessageIter props, entry;
+
+	if (g_str_equal(BLUEZ_DEVICE_INTERFACE, interface) == FALSE)
+		return TRUE;
+
+	if (dbus_message_iter_get_arg_type(iter) != DBUS_TYPE_ARRAY)
+		return TRUE;
+
+	dbus_message_iter_recurse(iter, &props);
+
+	while (dbus_message_iter_get_arg_type(&props) == DBUS_TYPE_DICT_ENTRY) {
+		const char *key;
+
+		dbus_message_iter_recurse(&props, &entry);
+		dbus_message_iter_get_basic(&entry, &key);
+
+		if (g_str_equal(key, "AddressType") == TRUE) {
+			DBusMessageIter var;
+			const char *addr_type;
+
+			dbus_message_iter_next(&entry);
+			dbus_message_iter_recurse(&entry, &var);
+			dbus_message_iter_get_basic(&var, &addr_type);
+
+			return !g_str_equal(addr_type, "random");
+		}
+
+		dbus_message_iter_next(&props);
+	}
+
+	return TRUE;
+}
+
 static void property_changed(GDBusProxy *proxy, const char *name,
 					DBusMessageIter *iter, void *user_data)
 {
@@ -844,6 +881,7 @@ static int hfp_init(void)
 	g_dbus_client_set_connect_watch(bluez, connect_handler, NULL);
 	g_dbus_client_set_proxy_handlers(bluez, proxy_added, NULL,
 						property_changed, NULL);
+	g_dbus_client_set_proxy_filter(bluez, proxy_filter, NULL);
 
 	ofono_handsfree_audio_ref();
 

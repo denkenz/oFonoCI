@@ -347,6 +347,11 @@ typedef void (* GDBusClientFunction) (GDBusClient *client, void *user_data);
 typedef void (* GDBusProxyFunction) (GDBusProxy *proxy, void *user_data);
 typedef void (* GDBusPropertyFunction) (GDBusProxy *proxy, const char *name,
 					DBusMessageIter *iter, void *user_data);
+typedef gboolean (* GDBusProxyFilterFunction) (GDBusClient *client,
+					const char *path,
+					const char *interface,
+					DBusMessageIter *iter,
+					void *user_data);
 
 gboolean g_dbus_proxy_set_property_watch(GDBusProxy *proxy,
 			GDBusPropertyFunction function, void *user_data);
@@ -376,6 +381,9 @@ gboolean g_dbus_client_set_proxy_handlers(GDBusClient *client,
 					GDBusProxyFunction proxy_added,
 					GDBusProxyFunction proxy_removed,
 					GDBusPropertyFunction property_changed,
+					void *user_data);
+gboolean g_dbus_client_set_proxy_filter(GDBusClient *client,
+					GDBusProxyFilterFunction proxy_filter,
 					void *user_data);
 
 #ifdef __cplusplus
