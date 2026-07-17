@@ -11,7 +11,13 @@ manager = dbus.Interface(bus.get_object('org.ofono', '/'),
 modems = manager.GetModems()
 path = modems[0][0]
 
+if (len(sys.argv) == 3):
+	path = sys.argv[1]
+	volume = sys.argv[2]
+else:
+	volume = sys.argv[1]
+
 cv = dbus.Interface(bus.get_object('org.ofono', path),
 						'org.ofono.CallVolume')
 
-cv.SetProperty("SpeakerVolume", dbus.Byte(int(sys.argv[1])))
+cv.SetProperty("SpeakerVolume", dbus.Byte(int(volume)))
