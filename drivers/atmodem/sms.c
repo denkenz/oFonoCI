@@ -451,7 +451,7 @@ static void at_cmt_notify(GAtResult *result, gpointer user_data)
 	decode_hex_own_buf(hexpdu, -1, &pdu_len, 0, pdu);
 	ofono_sms_deliver_notify(sms, pdu, pdu_len, tpdu_len);
 
-	if (data->vendor != OFONO_VENDOR_SIMCOM &&
+	if (data->vendor != OFONO_VENDOR_SIMCOM_SIM900 &&
 			data->vendor != OFONO_VENDOR_DROID)
 		at_ack_delivery(sms);
 	return;
@@ -984,6 +984,7 @@ static void at_cnmi_query_cb(gboolean ok, GAtResult *result, gpointer user_data)
 	case OFONO_VENDOR_HUAWEI:
 	case OFONO_VENDOR_NOVATEL:
 	case OFONO_VENDOR_OPTION_HSO:
+	case OFONO_VENDOR_SIMCOM_SIM900:
 		goto out;
 	default:
 		break;
