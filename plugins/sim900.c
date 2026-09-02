@@ -68,7 +68,7 @@ static void mux_ready_notify(GAtResult *result, gpointer user_data)
 	struct ofono_gprs *gprs = NULL;
 	struct ofono_gprs_context *gc;
 
-	ofono_sms_create(modem, OFONO_VENDOR_SIMCOM, "atmodem",
+	ofono_sms_create(modem, OFONO_VENDOR_SIMCOM_SIM900, "atmodem",
 					data->dlcs[SMS_DLC]);
 
 	gprs = ofono_gprs_create(modem, 0, "atmodem", data->dlcs[GPRS_DLC]);
@@ -406,7 +406,7 @@ static void sim900_post_sim(struct ofono_modem *modem)
 	if (data->modem_type == SIM900) {
 		ofono_phonebook_create(modem, 0, "atmodem",
 						data->dlcs[VOICE_DLC]);
-		ofono_sms_create(modem, OFONO_VENDOR_SIMCOM, "atmodem",
+		ofono_sms_create(modem, OFONO_VENDOR_SIMCOM_SIM900, "atmodem",
 						data->dlcs[SMS_DLC]);
 
 		gprs = ofono_gprs_create(modem, 0, "atmodem",
